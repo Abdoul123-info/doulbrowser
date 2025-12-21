@@ -11,15 +11,8 @@ on:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            platform: win
-          - os: macos-latest
-            platform: mac
-
-    runs-on: ${{ matrix.os }}
+    # Temporarily building only macOS for Electron 37 / macOS 11 support
+    runs-on: macos-latest
 
     steps:
       - name: Checkout code
@@ -34,24 +27,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build application
-        run: npm run build:${{ matrix.platform }}
+      - name: Build macOS application
+        run: npm run build:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false  # Skip code signing
 
-      - name: Upload Windows artifacts
-        if: matrix.platform == 'win'
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: |
-            dist/*.exe
-            dist/*.zip
-          retention-days: 30
-
       - name: Upload macOS artifacts
-        if: matrix.platform == 'mac'
         uses: actions/upload-artifact@v4
         with:
           name: macos-installer
@@ -68,12 +50,6 @@ jobs:
       contents: write  # Required to create releases
     
     steps:
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-installer
-          path: dist/
-
       - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
