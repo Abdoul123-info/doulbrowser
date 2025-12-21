@@ -1,4 +1,3 @@
-
 import { app, shell, BrowserWindow, ipcMain, dialog, Notification, session } from 'electron'
 import type { DownloadItem } from 'electron'
 import { join, basename, dirname } from 'path'
@@ -13,26 +12,25 @@ import { pluginManager } from './plugins/manager'
 // DEBUG REMOVE
 // console.log('Electron require:', require('electron'));
 
-
 // SIMPLIFIED FIX: Minimal flags to avoid TikTok detection
 // Remove aggressive flags that might trigger anti-bot systems
 // Minimal flags to avoid TikTok detection
 // Ensure app is defined before using it (Electron initialization safety)
 if (app) {
   try {
-    app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors');
-    app.commandLine.appendSwitch('disable-site-isolation-trials');
+    app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors')
+    app.commandLine.appendSwitch('disable-site-isolation-trials')
 
-    const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-    app.userAgentFallback = USER_AGENT;
+    const USER_AGENT =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    app.userAgentFallback = USER_AGENT
   } catch (e) {
-    console.error('Failed to set app flags:', e);
+    console.error('Failed to set app flags:', e)
   }
 } else {
-  console.error('CRITICAL: Electron app object is undefined at startup!');
+  console.error('CRITICAL: Electron app object is undefined at startup!')
 }
-
 
 // Store active downloads
 interface DownloadTracker {
@@ -155,7 +153,7 @@ let appSettings: AppSettings = {
   notifications: true,
   soundNotifications: false,
   language: 'fr'
-};
+}
 
 // Charger les vraies valeurs quand l'app est prête
 // Charger les vraies valeurs dans le bloc principal app.whenReady
@@ -183,146 +181,174 @@ const EXTENSION_PORT = 8765
 // Function to check and update yt-dlp automatically
 async function autoUpdateYtDlp(): Promise<void> {
   try {
-    console.log('[yt-dlp] Checking for updates...');
+    console.log('[yt-dlp] Checking for updates...')
 
-    const https = require('https');
-    const userDataPath = app.getPath('userData');
+    const https = require('https')
+    const userDataPath = app.getPath('userData')
 
     // v20: Platform-aware binary detection
-    const platform = process.platform;
-    const isMac = platform === 'darwin';
-    const isWindows = platform === 'win32';
+    const platform = process.platform
+    const isMac = platform === 'darwin'
+    const isWindows = platform === 'win32'
 
-    const binaryName = isWindows ? 'yt-dlp.exe' : 'yt-dlp';
-    const targetPath = join(userDataPath, binaryName);
+    const binaryName = isWindows ? 'yt-dlp.exe' : 'yt-dlp'
+    const targetPath = join(userDataPath, binaryName)
 
     // Download URL based on platform
-    let downloadUrl: string;
+    let downloadUrl: string
     if (isWindows) {
-      downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+      downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
     } else if (isMac) {
-      downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+      downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos'
     } else {
       // Linux
-      downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+      downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp'
     }
 
-    console.log(`[yt-dlp] Platform: ${platform}, Binary: ${binaryName}`);
+    console.log(`[yt-dlp] Platform: ${platform}, Binary: ${binaryName}`)
 
     const downloadFile = async (url: string, dest: string): Promise<void> => {
       return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(dest);
-        https.get(url, (response) => {
-          if (response.statusCode === 302 || response.statusCode === 301) {
-            file.close();
-            if (fs.existsSync(dest)) fs.unlinkSync(dest);
-            const redirectUrl = response.headers.location;
-            if (redirectUrl) {
-              downloadFile(redirectUrl, dest).then(resolve).catch(reject);
-            } else {
-              reject(new Error('Redirect location missing'));
-            }
-            return;
-          }
-          if (response.statusCode !== 200) {
-            file.close();
-            if (fs.existsSync(dest)) fs.unlinkSync(dest);
-            reject(new Error(`Failed to download: ${response.statusCode}`));
-            return;
-          }
-          response.pipe(file);
-          file.on('finish', () => {
-            file.close();
-            // Make executable on Unix systems
-            if (!isWindows) {
-              try {
-                fs.chmodSync(dest, 0o755);
-              } catch (e) {
-                console.warn('[yt-dlp] Could not set executable permission:', e);
+        const file = fs.createWriteStream(dest)
+        https
+          .get(url, (response) => {
+            if (response.statusCode === 302 || response.statusCode === 301) {
+              file.close()
+              if (fs.existsSync(dest)) fs.unlinkSync(dest)
+              const redirectUrl = response.headers.location
+              if (redirectUrl) {
+                downloadFile(redirectUrl, dest).then(resolve).catch(reject)
+              } else {
+                reject(new Error('Redirect location missing'))
               }
+              return
             }
-            resolve();
-          });
-          file.on('error', (err) => { file.close(); if (fs.existsSync(dest)) fs.unlinkSync(dest); reject(err); });
-        }).on('error', (err) => { file.close(); if (fs.existsSync(dest)) fs.unlinkSync(dest); reject(err); });
-      });
-    };
+            if (response.statusCode !== 200) {
+              file.close()
+              if (fs.existsSync(dest)) fs.unlinkSync(dest)
+              reject(new Error(`Failed to download: ${response.statusCode}`))
+              return
+            }
+            response.pipe(file)
+            file.on('finish', () => {
+              file.close()
+              // Make executable on Unix systems
+              if (!isWindows) {
+                try {
+                  fs.chmodSync(dest, 0o755)
+                } catch (e) {
+                  console.warn('[yt-dlp] Could not set executable permission:', e)
+                }
+              }
+              resolve()
+            })
+            file.on('error', (err) => {
+              file.close()
+              if (fs.existsSync(dest)) fs.unlinkSync(dest)
+              reject(err)
+            })
+          })
+          .on('error', (err) => {
+            file.close()
+            if (fs.existsSync(dest)) fs.unlinkSync(dest)
+            reject(err)
+          })
+      })
+    }
 
-    let ytDlpPath = ensureYtDlpAvailable();
+    const ytDlpPath = ensureYtDlpAvailable()
     if (!ytDlpPath) {
-      console.log('[yt-dlp] Not found. Performing initial installation...');
-      await downloadFile(downloadUrl, targetPath);
-      console.log('[yt-dlp] Initial installation successful');
-      return;
+      console.log('[yt-dlp] Not found. Performing initial installation...')
+      await downloadFile(downloadUrl, targetPath)
+      console.log('[yt-dlp] Initial installation successful')
+      return
     }
 
     const getCurrentVersion = (): Promise<string> => {
       return new Promise((resolve) => {
-        const proc = spawn(ytDlpPath as string, ['--version']);
-        let version = '';
-        proc.stdout.on('data', (data) => { version += data.toString().trim(); });
-        proc.on('close', () => { resolve(version || 'unknown'); });
-        setTimeout(() => { proc.kill(); resolve('unknown'); }, 5000);
-      });
-    };
-
-    const currentVersion = await getCurrentVersion();
-    const getLatestVersion = (): Promise<string> => {
-      return new Promise((resolve, reject) => {
-        const options = { hostname: 'api.github.com', path: '/repos/yt-dlp/yt-dlp/releases/latest', headers: { 'User-Agent': 'DoulBrowser' } };
-        https.get(options, (res) => {
-          let data = '';
-          res.on('data', (chunk) => data += chunk);
-          res.on('end', () => { try { resolve(JSON.parse(data).tag_name || 'unknown'); } catch (e) { reject(e); } });
-        }).on('error', reject);
-      });
-    };
-
-    const latestVersion = await getLatestVersion();
-    if (currentVersion === latestVersion) {
-      console.log('[yt-dlp] Already up to date');
-      return;
+        const proc = spawn(ytDlpPath as string, ['--version'])
+        let version = ''
+        proc.stdout.on('data', (data) => {
+          version += data.toString().trim()
+        })
+        proc.on('close', () => {
+          resolve(version || 'unknown')
+        })
+        setTimeout(() => {
+          proc.kill()
+          resolve('unknown')
+        }, 5000)
+      })
     }
 
-    console.log(`[yt-dlp] New version available: ${latestVersion}`);
-    const tempPath = targetPath + '.tmp';
-    console.log('[yt-dlp] Downloading update...');
-    await downloadFile(downloadUrl, tempPath);
+    const currentVersion = await getCurrentVersion()
+    const getLatestVersion = (): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const options = {
+          hostname: 'api.github.com',
+          path: '/repos/yt-dlp/yt-dlp/releases/latest',
+          headers: { 'User-Agent': 'DoulBrowser' }
+        }
+        https
+          .get(options, (res) => {
+            let data = ''
+            res.on('data', (chunk) => (data += chunk))
+            res.on('end', () => {
+              try {
+                resolve(JSON.parse(data).tag_name || 'unknown')
+              } catch (e) {
+                reject(e)
+              }
+            })
+          })
+          .on('error', reject)
+      })
+    }
+
+    const latestVersion = await getLatestVersion()
+    if (currentVersion === latestVersion) {
+      console.log('[yt-dlp] Already up to date')
+      return
+    }
+
+    console.log(`[yt-dlp] New version available: ${latestVersion}`)
+    const tempPath = targetPath + '.tmp'
+    console.log('[yt-dlp] Downloading update...')
+    await downloadFile(downloadUrl, tempPath)
 
     if (existsSync(targetPath)) {
       try {
-        fs.unlinkSync(targetPath);
+        fs.unlinkSync(targetPath)
       } catch (err: any) {
         if (err.code === 'EPERM' || err.code === 'EBUSY') {
-          console.warn('[yt-dlp] Binary is locked, will attempt replacement on next start');
-          return;
+          console.warn('[yt-dlp] Binary is locked, will attempt replacement on next start')
+          return
         }
-        throw err;
+        throw err
       }
     }
 
     try {
-      fs.renameSync(tempPath, targetPath);
+      fs.renameSync(tempPath, targetPath)
     } catch (err: any) {
-      console.warn('[yt-dlp] Could not rename update, binary likely in use:', err.message);
-      return;
+      console.warn('[yt-dlp] Could not rename update, binary likely in use:', err.message)
+      return
     }
 
-    console.log(`[yt-dlp] Successfully updated to ${latestVersion} at ${targetPath}`);
-    sendNotification('yt-dlp mis à jour', `Version ${latestVersion} installée`, false);
-
+    console.log(`[yt-dlp] Successfully updated to ${latestVersion} at ${targetPath}`)
+    sendNotification('yt-dlp mis à jour', `Version ${latestVersion} installée`, false)
   } catch (error) {
-    console.error('[yt-dlp] Auto-update failed:', error);
+    console.error('[yt-dlp] Auto-update failed:', error)
   }
 }
 
-
 function createWindow(): void {
+  console.log('[DEBUG] createWindow() called')
   // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
-    show: false,
+    show: !app.isPackaged, // Show immediately in dev to debug loading issues
     title: 'DoulBrowser',
     autoHideMenuBar: true,
     icon: icon, // Utiliser l'icône pour toutes les plateformes
@@ -337,7 +363,29 @@ function createWindow(): void {
     }
   })
 
+  // [DEBUG] Add loaders error tracking
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL) => {
+      console.error(
+        `[DEBUG] Failed to load URL: ${validatedURL}, Error: ${errorDescription} (${errorCode})`
+      )
+    }
+  )
+
+  // Use render-process-gone instead of deprecated crashed
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(
+      `[DEBUG] Renderer process gone! Reason: ${details.reason}, ExitCode: ${details.exitCode}`
+    )
+  })
+
+  mainWindow.webContents.on('dom-ready', () => {
+    console.log('[DEBUG] DOM is ready')
+  })
+
   mainWindow.on('ready-to-show', () => {
+    console.log('[DEBUG] Window ready-to-show event fired')
     mainWindow.show()
   })
 
@@ -347,15 +395,22 @@ function createWindow(): void {
   })
 
   // HMR for renderer base on electron-vite cli.
+  console.log('[DEBUG] app.isPackaged:', app.isPackaged)
+  console.log('[DEBUG] ELECTRON_RENDERER_URL:', process.env['ELECTRON_RENDERER_URL'])
+
   // Load the remote URL for development or the local html file for production.
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
+    console.log('[DEBUG] Detected Dev Mode - Loading URL:', process.env['ELECTRON_RENDERER_URL'])
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    // Open DevTools immediately in dev mode
+    mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    const htmlPath = join(__dirname, '../renderer/index.html')
+    console.log('[DEBUG] Detected Prod Mode - Loading File:', htmlPath)
+    mainWindow.loadFile(htmlPath)
   }
 
   // Activer l'extension de capture de téléchargements (style IDM)
-
 
   // Handle downloads
   mainWindow.webContents.session.on('will-download', (_event, item, _webContents) => {
@@ -489,10 +544,12 @@ function isSocialMediaURL(url: string): { isSocial: boolean; platform: string } 
     // 1. Check file extensions in path
     // EXCEPTION: Do not treat as direct download if it's a known social CDN (fbcdn, tiktokcdn)
     // This allows yt-dlp to handle headers/cookies for these platforms.
-    if (urlObj.pathname.match(/\.(mp4|webm|mkv|avi|mov|m3u8|ts)$/i) &&
+    if (
+      urlObj.pathname.match(/\.(mp4|webm|mkv|avi|mov|m3u8|ts)$/i) &&
       !hostname.includes('fbcdn.net') &&
       !hostname.includes('tiktokcdn') &&
-      !hostname.includes('webapp-prime.tiktok.com')) {
+      !hostname.includes('webapp-prime.tiktok.com')
+    ) {
       return { isSocial: false, platform: '' }
     }
 
@@ -502,7 +559,8 @@ function isSocialMediaURL(url: string): { isSocial: boolean; platform: string } 
     }
 
     // 3. Check for specific CDN subdomains that are definitely NOT user pages
-    if (hostname.includes('googlevideo.com')) { // YouTube CDN
+    if (hostname.includes('googlevideo.com')) {
+      // YouTube CDN
       return { isSocial: false, platform: '' }
     }
 
@@ -511,7 +569,12 @@ function isSocialMediaURL(url: string): { isSocial: boolean; platform: string } 
       return { isSocial: true, platform: 'YouTube' }
     }
     // Facebook
-    if (hostname.includes('facebook.com') || hostname.includes('fb.com') || hostname.includes('fb.watch') || hostname.includes('fbcdn.net')) {
+    if (
+      hostname.includes('facebook.com') ||
+      hostname.includes('fb.com') ||
+      hostname.includes('fb.watch') ||
+      hostname.includes('fbcdn.net')
+    ) {
       return { isSocial: true, platform: 'Facebook' }
     }
     // Instagram
@@ -519,7 +582,12 @@ function isSocialMediaURL(url: string): { isSocial: boolean; platform: string } 
       return { isSocial: true, platform: 'Instagram' }
     }
     // TikTok
-    if (hostname.includes('tiktok.com') || hostname.includes('vm.tiktok.com') || hostname.includes('tiktokcdn') || hostname.includes('webapp-prime.tiktok.com')) {
+    if (
+      hostname.includes('tiktok.com') ||
+      hostname.includes('vm.tiktok.com') ||
+      hostname.includes('tiktokcdn') ||
+      hostname.includes('webapp-prime.tiktok.com')
+    ) {
       return { isSocial: true, platform: 'TikTok' }
     }
     // Twitter/X
@@ -568,7 +636,12 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
     const requestHeaders = tracker?.headers || {}
 
     // Étape 1: Obtenir la taille du fichier et vérifier le support Range
-    const fileInfo = await new Promise<{ size: number; supportsRange: boolean; filename: string; mimeType: string }>((resolve, reject) => {
+    const fileInfo = await new Promise<{
+      size: number
+      supportsRange: boolean
+      filename: string
+      mimeType: string
+    }>((resolve, reject) => {
       const options = {
         hostname: urlObj.hostname,
         port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
@@ -588,7 +661,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
             filename: 'download',
             mimeType: 'application/octet-stream' // fallback
           })
-          return;
+          return
         }
 
         if (res.statusCode >= 400) {
@@ -627,9 +700,12 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
     })
 
     // Check content type to avoid downloading HTML pages
-    if (fileInfo.mimeType && (fileInfo.mimeType.includes('text/html') || fileInfo.mimeType.includes('application/json'))) {
-      console.warn('Detected invalid content type:', fileInfo.mimeType);
-      throw new Error(`Invalid content type: ${fileInfo.mimeType}. Likely an error page.`);
+    if (
+      fileInfo.mimeType &&
+      (fileInfo.mimeType.includes('text/html') || fileInfo.mimeType.includes('application/json'))
+    ) {
+      console.warn('Detected invalid content type:', fileInfo.mimeType)
+      throw new Error(`Invalid content type: ${fileInfo.mimeType}. Likely an error page.`)
     }
 
     if (!fileInfo.supportsRange || fileInfo.size === 0) {
@@ -652,7 +728,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
       const req = protocol.request(options, (res: any) => {
         if (res.statusCode >= 400) {
           fileStream.close()
-          fs.unlink(filePath, () => { })
+          fs.unlink(filePath, () => {})
           throw new Error(`HTTP ${res.statusCode} during single stream download`)
         }
 
@@ -666,7 +742,8 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
           const tracker = activeDownloads.get(url)
           if (tracker && !tracker.paused && !tracker.cancelled) {
             const progress = totalSize > 0 ? (downloaded / totalSize) * 100 : 0
-            const speed = (downloaded - tracker.lastBytes) / ((Date.now() - tracker.lastTime) / 1000)
+            const speed =
+              (downloaded - tracker.lastBytes) / ((Date.now() - tracker.lastTime) / 1000)
             tracker.lastProgress = Math.round(progress)
             tracker.lastBytes = downloaded
             tracker.lastTime = Date.now()
@@ -692,7 +769,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
         })
 
         fileStream.on('error', (err: any) => {
-          fs.unlink(filePath, () => { })
+          fs.unlink(filePath, () => {})
           win.webContents.send('download-error', { url, error: err.message })
         })
       })
@@ -709,95 +786,97 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
     const filePath = join(savePath, fileInfo.filename)
     const segmentBuffers: Buffer[] = new Array(numThreads)
 
-    await Promise.all(Array.from({ length: numThreads }, async (_, index) => {
-      return new Promise<void>((resolve, reject) => {
-        const start = index * segmentSize
-        const end = index === numThreads - 1 ? fileInfo.size - 1 : start + segmentSize - 1
+    await Promise.all(
+      Array.from({ length: numThreads }, async (_, index) => {
+        return new Promise<void>((resolve, reject) => {
+          const start = index * segmentSize
+          const end = index === numThreads - 1 ? fileInfo.size - 1 : start + segmentSize - 1
 
-        const options = {
-          hostname: urlObj.hostname,
-          port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
-          path: urlObj.pathname + urlObj.search,
-          method: 'GET',
-          headers: {
-            'Range': `bytes = ${start} -${end} `,
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            ...requestHeaders
-          }
-        }
-
-        const chunks: Buffer[] = []
-        const req = protocol.request(options, (res: any) => {
-          const trackerStart = activeDownloads.get(url)
-          if (trackerStart?.paused || trackerStart?.cancelled) {
-            req.destroy()
-            resolve()
-            return
+          const options = {
+            hostname: urlObj.hostname,
+            port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+            path: urlObj.pathname + urlObj.search,
+            method: 'GET',
+            headers: {
+              Range: `bytes = ${start} -${end} `,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              ...requestHeaders
+            }
           }
 
-          if (res.statusCode >= 400) {
-            reject(new Error(`HTTP ${res.statusCode} for segment ${index}`))
-            return
-          }
-
-          res.on('data', (chunk: Buffer) => {
-            const trackerData = activeDownloads.get(url)
-            if (trackerData?.paused || trackerData?.cancelled) {
+          const chunks: Buffer[] = []
+          const req = protocol.request(options, (res: any) => {
+            const trackerStart = activeDownloads.get(url)
+            if (trackerStart?.paused || trackerStart?.cancelled) {
               req.destroy()
               resolve()
               return
             }
-            chunks.push(chunk)
 
-            const tracker = activeDownloads.get(url)
-            if (tracker && !tracker.paused && !tracker.cancelled) {
-              // Calculate global progress
-              // For simplicity, we just add this chunk to tracker
-              // But strictly we should sum all segments. 
-              // We'll rely on global tracking in IDM style later or approximate here.
-              // For now, let's just trigger progress update
-              tracker.lastBytes += chunk.length;
-              // Note: strictly this is "bytes received since start", not total file size yet
-              // We'll fix progress calc slightly to be simple:
-              const progress = (tracker.lastBytes / fileInfo.size) * 100
-              tracker.lastProgress = Math.round(progress)
-
-              const speed = (chunk.length) / ((Date.now() - tracker.lastTime + 1) / 1000)
-              // Rough speed approximation
-              tracker.lastTime = Date.now()
-
-              win.webContents.send('download-progress', {
-                filename: fileInfo.filename,
-                url: url,
-                progress: Math.round(progress),
-                receivedBytes: tracker.lastBytes,
-                totalBytes: fileInfo.size,
-                state: 'downloading',
-                speed: speed, // Placeholder
-                timeLeft: '--',
-                originalUrl: url,
-                canResume: true
-              })
-            }
-          })
-
-          res.on('end', () => {
-            const trackerEnd = activeDownloads.get(url)
-            if (trackerEnd?.paused || trackerEnd?.cancelled) {
-              resolve()
+            if (res.statusCode >= 400) {
+              reject(new Error(`HTTP ${res.statusCode} for segment ${index}`))
               return
             }
-            segmentBuffers[index] = Buffer.concat(chunks)
-            resolve()
+
+            res.on('data', (chunk: Buffer) => {
+              const trackerData = activeDownloads.get(url)
+              if (trackerData?.paused || trackerData?.cancelled) {
+                req.destroy()
+                resolve()
+                return
+              }
+              chunks.push(chunk)
+
+              const tracker = activeDownloads.get(url)
+              if (tracker && !tracker.paused && !tracker.cancelled) {
+                // Calculate global progress
+                // For simplicity, we just add this chunk to tracker
+                // But strictly we should sum all segments.
+                // We'll rely on global tracking in IDM style later or approximate here.
+                // For now, let's just trigger progress update
+                tracker.lastBytes += chunk.length
+                // Note: strictly this is "bytes received since start", not total file size yet
+                // We'll fix progress calc slightly to be simple:
+                const progress = (tracker.lastBytes / fileInfo.size) * 100
+                tracker.lastProgress = Math.round(progress)
+
+                const speed = chunk.length / ((Date.now() - tracker.lastTime + 1) / 1000)
+                // Rough speed approximation
+                tracker.lastTime = Date.now()
+
+                win.webContents.send('download-progress', {
+                  filename: fileInfo.filename,
+                  url: url,
+                  progress: Math.round(progress),
+                  receivedBytes: tracker.lastBytes,
+                  totalBytes: fileInfo.size,
+                  state: 'downloading',
+                  speed: speed, // Placeholder
+                  timeLeft: '--',
+                  originalUrl: url,
+                  canResume: true
+                })
+              }
+            })
+
+            res.on('end', () => {
+              const trackerEnd = activeDownloads.get(url)
+              if (trackerEnd?.paused || trackerEnd?.cancelled) {
+                resolve()
+                return
+              }
+              segmentBuffers[index] = Buffer.concat(chunks)
+              resolve()
+            })
+
+            res.on('error', reject)
           })
 
-          res.on('error', reject)
+          req.on('error', reject)
+          req.end()
         })
-
-        req.on('error', reject)
-        req.end()
       })
-    }))
+    )
 
     const trackerFinal = activeDownloads.get(url)
     if (trackerFinal?.cancelled) {
@@ -816,20 +895,23 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
       state: 'finished',
       savePath: filePath
     })
-    sendNotification('Téléchargement terminé', `${fileInfo.filename} a été téléchargé avec succès`, true)
+    sendNotification(
+      'Téléchargement terminé',
+      `${fileInfo.filename} a été téléchargé avec succès`,
+      true
+    )
     handleDownloadEnd(url)
-
   } catch (error: any) {
     console.error('Multi-threaded download error:', error)
 
-    console.log('Falling back to yt-dlp with headers...');
-    const tracker = activeDownloads.get(url);
+    console.log('Falling back to yt-dlp with headers...')
+    const tracker = activeDownloads.get(url)
     if (tracker) {
-      tracker.strategy = 'yt-dlp';
-      win.webContents.send('download-status', { url, status: 'Falling back to safe mode...' });
+      tracker.strategy = 'yt-dlp'
+      win.webContents.send('download-status', { url, status: 'Falling back to safe mode...' })
       // Retry with yt-dlp using captured headers
-      await downloadWithYtDlp(url, savePath, 'Generic', win);
-      return;
+      await downloadWithYtDlp(url, savePath, 'Generic', win)
+      return
     }
 
     win.webContents.send('download-error', { url, error: error.message || 'Download failed' })
@@ -839,17 +921,17 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
 
 // Helper to find yt-dlp path
 function ensureYtDlpAvailable(): string | null {
-  const appPath = app.getAppPath();
-  const userDataPath = app.getPath('userData');
-  const resourcesPath = process.resourcesPath || appPath;
+  const appPath = app.getAppPath()
+  const userDataPath = app.getPath('userData')
+  const resourcesPath = process.resourcesPath || appPath
 
   // v20: Platform-aware binary name
-  const isWindows = process.platform === 'win32';
-  const binaryName = isWindows ? 'yt-dlp.exe' : 'yt-dlp';
+  const isWindows = process.platform === 'win32'
+  const binaryName = isWindows ? 'yt-dlp.exe' : 'yt-dlp'
 
   // 1. Check for updated version in userData first (writable area)
-  const updatedPath = join(userDataPath, binaryName);
-  if (existsSync(updatedPath)) return updatedPath;
+  const updatedPath = join(userDataPath, binaryName)
+  if (existsSync(updatedPath)) return updatedPath
 
   // 2. Fallbacks to bundled versions
   const possiblePaths = [
@@ -858,56 +940,59 @@ function ensureYtDlpAvailable(): string | null {
     join(resourcesPath, binaryName),
     join(appPath, binaryName),
     binaryName
-  ];
+  ]
 
   for (const path of possiblePaths) {
-    if (existsSync(path)) return path;
+    if (existsSync(path)) return path
   }
-  return null;
+  return null
 }
 
 // Helper to get video info (formats)
 // Helper to get video info (formats) - V12 Smart Retry
-async function fetchVideoInfo(url: string, requestHeaders: Record<string, string> = {}): Promise<any> {
+async function fetchVideoInfo(
+  url: string,
+  requestHeaders: Record<string, string> = {}
+): Promise<any> {
   const runYtDlp = (useCookies: boolean) => {
     return new Promise((resolve, reject) => {
-      const ytDlpPath = ensureYtDlpAvailable();
-      if (!ytDlpPath) return reject(new Error('yt-dlp not found'));
+      const ytDlpPath = ensureYtDlpAvailable()
+      if (!ytDlpPath) return reject(new Error('yt-dlp not found'))
 
       // Portable JS Engine injection
-      const env = { ...process.env };
-      const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') || 'PATH';
+      const env = { ...process.env }
+      const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') || 'PATH'
 
       // v20: Cross-platform Node.js path detection
-      const isWindows = process.platform === 'win32';
-      const isMac = process.platform === 'darwin';
-      const nodeBinary = isWindows ? 'node.exe' : 'node';
+      const isWindows = process.platform === 'win32'
+      const isMac = process.platform === 'darwin'
+      const nodeBinary = isWindows ? 'node.exe' : 'node'
 
-      const possibleNodeDirs = isWindows ? [
-        'C:\\Program Files\\nodejs',
-        join(process.resourcesPath, 'node'),
-        dirname(process.execPath)
-      ] : isMac ? [
-        '/opt/homebrew/bin', // Apple Silicon
-        '/usr/local/bin', // Intel Mac
-        '/usr/bin',
-        join(process.resourcesPath, 'node'),
-        dirname(process.execPath)
-      ] : [
-        '/usr/bin',
-        '/usr/local/bin',
-        dirname(process.execPath)
-      ];
+      const possibleNodeDirs = isWindows
+        ? [
+            'C:\\Program Files\\nodejs',
+            join(process.resourcesPath, 'node'),
+            dirname(process.execPath)
+          ]
+        : isMac
+          ? [
+              '/opt/homebrew/bin', // Apple Silicon
+              '/usr/local/bin', // Intel Mac
+              '/usr/bin',
+              join(process.resourcesPath, 'node'),
+              dirname(process.execPath)
+            ]
+          : ['/usr/bin', '/usr/local/bin', dirname(process.execPath)]
 
       // Find Node.js and add to PATH
       for (const dir of possibleNodeDirs) {
         if (existsSync(join(dir, nodeBinary))) {
-          env[pathKey] = `${dir}${process.platform === 'win32' ? ';' : ':'}${env[pathKey]}`;
-          break;
+          env[pathKey] = `${dir}${process.platform === 'win32' ? ';' : ':'}${env[pathKey]}`
+          break
         }
       }
 
-      env['YTDLP_JS_ENGINE'] = 'node';
+      env['YTDLP_JS_ENGINE'] = 'node'
 
       const args = [
         url,
@@ -915,101 +1000,112 @@ async function fetchVideoInfo(url: string, requestHeaders: Record<string, string
         '--no-playlist',
         '--no-warnings',
         '--no-check-certificates',
-        '--skip-download',              // Don't download, just get metadata
-        '--no-write-thumbnail',         // Don't download thumbnail
-        '--no-write-info-json',         // Don't write info file
-        '--no-write-description',       // Don't write description
-        '--no-write-comments',          // Don't fetch comments
-        '--extractor-retries', '1',     // Only 1 retry on failure
-        '--socket-timeout', '5'         // 5 second timeout
-      ];
+        '--skip-download', // Don't download, just get metadata
+        '--no-write-thumbnail', // Don't download thumbnail
+        '--no-write-info-json', // Don't write info file
+        '--no-write-description', // Don't write description
+        '--no-write-comments', // Don't fetch comments
+        '--extractor-retries',
+        '1', // Only 1 retry on failure
+        '--socket-timeout',
+        '5' // 5 second timeout
+      ]
 
       // [V17 FIX] Info Metadata Authentication: Use direct headers
       if (useCookies && Object.keys(requestHeaders).length > 0) {
         for (const key in requestHeaders) {
-          args.push('--add-header', `${key}:${requestHeaders[key]}`);
+          args.push('--add-header', `${key}:${requestHeaders[key]}`)
         }
       }
 
-      console.log(`[yt-dlp] Fetching video info (Cookies: ${useCookies}) for: ${url}`);
-      const process_info = spawn(ytDlpPath, args, { env });
+      console.log(`[yt-dlp] Fetching video info (Cookies: ${useCookies}) for: ${url}`)
+      const process_info = spawn(ytDlpPath, args, { env })
 
-      let output = '';
-      let errorOutput = '';
+      let output = ''
+      let errorOutput = ''
 
-      process_info.stdout.on('data', (data) => output += data.toString());
-      process_info.stderr.on('data', (data) => errorOutput += data.toString());
+      process_info.stdout.on('data', (data) => (output += data.toString()))
+      process_info.stderr.on('data', (data) => (errorOutput += data.toString()))
 
       process_info.on('close', (code) => {
-
         if (code === 0) {
           try {
-            resolve(JSON.parse(output));
-          } catch (e) {
-            reject(new Error('Failed to parse metadata'));
+            resolve(JSON.parse(output))
+          } catch (_e) {
+            reject(new Error('Failed to parse metadata'))
           }
         } else {
-          reject(new Error(errorOutput || `yt-dlp exited with code ${code}`));
+          reject(new Error(errorOutput || `yt-dlp exited with code ${code}`))
         }
-      });
-    });
-  };
+      })
+    })
+  }
 
   try {
     // V13 OPTIMIZATION: For YouTube, ALWAYS use cookieless extraction (fastest & most reliable)
     // Diagnostics showed: no-cookies = 37 formats, with-cookies = 5-11 formats + often fails
-    const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+    const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
 
     if (isYouTube) {
-      console.log('[yt-dlp] YouTube detected - using instant cookieless extraction for maximum speed');
-      return await runYtDlp(false);
+      console.log(
+        '[yt-dlp] YouTube detected - using instant cookieless extraction for maximum speed'
+      )
+      return await runYtDlp(false)
     }
 
     // For other platforms, try with cookies first (for private videos)
-    const hasCookies = !!(requestHeaders['cookie'] || requestHeaders['Cookie']);
-    return await runYtDlp(hasCookies);
+    const hasCookies = !!(requestHeaders['cookie'] || requestHeaders['Cookie'])
+    return await runYtDlp(hasCookies)
   } catch (err: any) {
     // Fallback WITHOUT cookies if authenticated extraction fails
-    if (err.message.includes('Requested format is not available') || err.message.includes('Please sign in')) {
-      console.log('[yt-dlp] Info fetch with cookies failed, attempting legacy fallback WITHOUT cookies...');
-      return await runYtDlp(false);
+    if (
+      err.message.includes('Requested format is not available') ||
+      err.message.includes('Please sign in')
+    ) {
+      console.log(
+        '[yt-dlp] Info fetch with cookies failed, attempting legacy fallback WITHOUT cookies...'
+      )
+      return await runYtDlp(false)
     }
-    throw err;
+    throw err
   }
 }
 
 // Helper functions are defined above
-
 
 async function ensureFfmpegAvailable(_win?: BrowserWindow): Promise<string | null> {
   const appPath = app.getAppPath()
   const resourcesPath = process.resourcesPath || appPath
 
   // v20: Platform-aware binary search
-  const isWindows = process.platform === 'win32';
-  const isMac = process.platform === 'darwin';
+  const isWindows = process.platform === 'win32'
+  const isMac = process.platform === 'darwin'
 
-  const possibleFfmpegPaths = isWindows ? [
-    join(resourcesPath, 'app.asar.unpacked', 'ffmpeg.exe'),
-    join(resourcesPath, 'ffmpeg.exe'),
-    join(app.getPath('userData'), 'bin', 'ffmpeg.exe'),
-    'ffmpeg.exe'
-  ] : isMac ? [
-    // macOS Homebrew locations (Intel + Apple Silicon)
-    '/opt/homebrew/bin/ffmpeg', // Apple Silicon (M1/M2/M3)
-    '/usr/local/bin/ffmpeg', // Intel Macs
-    join(resourcesPath, 'app.asar.unpacked', 'ffmpeg'),
-    join(resourcesPath, 'ffmpeg'),
-    join(app.getPath('userData'), 'bin', 'ffmpeg'),
-    'ffmpeg'
-  ] : [
-    // Linux
-    '/usr/bin/ffmpeg',
-    '/usr/local/bin/ffmpeg',
-    join(resourcesPath, 'app.asar.unpacked', 'ffmpeg'),
-    join(resourcesPath, 'ffmpeg'),
-    'ffmpeg'
-  ];
+  const possibleFfmpegPaths = isWindows
+    ? [
+        join(resourcesPath, 'app.asar.unpacked', 'ffmpeg.exe'),
+        join(resourcesPath, 'ffmpeg.exe'),
+        join(app.getPath('userData'), 'bin', 'ffmpeg.exe'),
+        'ffmpeg.exe'
+      ]
+    : isMac
+      ? [
+          // macOS Homebrew locations (Intel + Apple Silicon)
+          '/opt/homebrew/bin/ffmpeg', // Apple Silicon (M1/M2/M3)
+          '/usr/local/bin/ffmpeg', // Intel Macs
+          join(resourcesPath, 'app.asar.unpacked', 'ffmpeg'),
+          join(resourcesPath, 'ffmpeg'),
+          join(app.getPath('userData'), 'bin', 'ffmpeg'),
+          'ffmpeg'
+        ]
+      : [
+          // Linux
+          '/usr/bin/ffmpeg',
+          '/usr/local/bin/ffmpeg',
+          join(resourcesPath, 'app.asar.unpacked', 'ffmpeg'),
+          join(resourcesPath, 'ffmpeg'),
+          'ffmpeg'
+        ]
 
   for (const path of possibleFfmpegPaths) {
     if (existsSync(path)) {
@@ -1022,10 +1118,12 @@ async function ensureFfmpegAvailable(_win?: BrowserWindow): Promise<string | nul
 
   // Auto-download only supported on Windows
   if (!isWindows) {
-    console.log('[FFmpeg] macOS/Linux: Please install ffmpeg via Homebrew or package manager');
-    console.log('[FFmpeg] macOS: brew install ffmpeg');
-    console.log('[FFmpeg] Linux: sudo apt install ffmpeg (Debian/Ubuntu) or sudo yum install ffmpeg (RHEL/CentOS)');
-    return null;
+    console.log('[FFmpeg] macOS/Linux: Please install ffmpeg via Homebrew or package manager')
+    console.log('[FFmpeg] macOS: brew install ffmpeg')
+    console.log(
+      '[FFmpeg] Linux: sudo apt install ffmpeg (Debian/Ubuntu) or sudo yum install ffmpeg (RHEL/CentOS)'
+    )
+    return null
   }
 
   console.log('[FFmpeg] Starting automatic download for Windows...')
@@ -1036,10 +1134,11 @@ async function ensureFfmpegAvailable(_win?: BrowserWindow): Promise<string | nul
   }
 
   const ffmpegPath = join(ffmpegDir, 'ffmpeg.exe')
-  const ffmpegUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
+  const ffmpegUrl =
+    'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
 
   try {
-    const winForDownload = _win || BrowserWindow.getAllWindows().find(w => !w.isDestroyed())
+    const winForDownload = _win || BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
 
     winForDownload?.webContents.send('download-started', {
       url: 'dependency-ffmpeg',
@@ -1048,68 +1147,75 @@ async function ensureFfmpegAvailable(_win?: BrowserWindow): Promise<string | nul
       progress: 0,
       status: 'downloading',
       createdAt: Date.now()
-    });
+    })
 
     return new Promise<string | null>((resolve) => {
       const https = require('https')
       const { createWriteStream } = require('fs')
       const fileStream = createWriteStream(join(ffmpegDir, 'ffmpeg.zip'))
-      let receivedBytes = 0;
+      let receivedBytes = 0
 
-      https.get(ffmpegUrl, (response: any) => {
-        const handleResponse = (res: any) => {
-          if (res.statusCode === 302 || res.statusCode === 301) {
-            https.get(res.headers.location, handleResponse).on('error', (_e: any) => {
-              fileStream.close();
-              resolve(null);
-            });
-            return;
-          }
-
-          if (res.statusCode !== 200) {
-            fileStream.close();
-            resolve(null);
-            return;
-          }
-
-          const totalSize = parseInt(res.headers['content-length'] || '80000000');
-          res.on('data', (c: any) => {
-            receivedBytes += c.length;
-            if (Math.random() < 0.05) {
-              winForDownload?.webContents.send('download-progress', {
-                url: 'dependency-ffmpeg',
-                progress: (receivedBytes / totalSize) * 100,
-                state: 'downloading',
-                filename: 'Downloading FFmpeg...'
-              });
+      https
+        .get(ffmpegUrl, (response: any) => {
+          const handleResponse = (res: any) => {
+            if (res.statusCode === 302 || res.statusCode === 301) {
+              https.get(res.headers.location, handleResponse).on('error', (_e: any) => {
+                fileStream.close()
+                resolve(null)
+              })
+              return
             }
-          });
-          res.pipe(fileStream)
-          fileStream.on('finish', async () => {
-            fileStream.close()
-            try {
-              const AdmZip = require('adm-zip')
-              const zip = new AdmZip(join(ffmpegDir, 'ffmpeg.zip'))
-              const entries = zip.getEntries()
-              const ffmpegEntry = entries.find((e: any) => e.entryName.endsWith('ffmpeg.exe'))
-              if (ffmpegEntry) {
-                await fsPromises.writeFile(ffmpegPath, ffmpegEntry.getData())
-                try { await fsPromises.unlink(join(ffmpegDir, 'ffmpeg.zip')) } catch (e) { }
-                winForDownload?.webContents.send('download-complete', { url: 'dependency-ffmpeg', filename: 'FFmpeg Ready' });
-                resolve(ffmpegPath)
-              } else {
+
+            if (res.statusCode !== 200) {
+              fileStream.close()
+              resolve(null)
+              return
+            }
+
+            const totalSize = parseInt(res.headers['content-length'] || '80000000')
+            res.on('data', (c: any) => {
+              receivedBytes += c.length
+              if (Math.random() < 0.05) {
+                winForDownload?.webContents.send('download-progress', {
+                  url: 'dependency-ffmpeg',
+                  progress: (receivedBytes / totalSize) * 100,
+                  state: 'downloading',
+                  filename: 'Downloading FFmpeg...'
+                })
+              }
+            })
+            res.pipe(fileStream)
+            fileStream.on('finish', async () => {
+              fileStream.close()
+              try {
+                const AdmZip = require('adm-zip')
+                const zip = new AdmZip(join(ffmpegDir, 'ffmpeg.zip'))
+                const entries = zip.getEntries()
+                const ffmpegEntry = entries.find((e: any) => e.entryName.endsWith('ffmpeg.exe'))
+                if (ffmpegEntry) {
+                  await fsPromises.writeFile(ffmpegPath, ffmpegEntry.getData())
+                  try {
+                    await fsPromises.unlink(join(ffmpegDir, 'ffmpeg.zip'))
+                  } catch (_e) {}
+                  winForDownload?.webContents.send('download-complete', {
+                    url: 'dependency-ffmpeg',
+                    filename: 'FFmpeg Ready'
+                  })
+                  resolve(ffmpegPath)
+                } else {
+                  resolve(null)
+                }
+              } catch (_e) {
                 resolve(null)
               }
-            } catch (e) {
-              resolve(null)
-            }
-          })
-        };
-        handleResponse(response);
-      }).on('error', (_e: any) => {
-        fileStream.close();
-        resolve(null);
-      });
+            })
+          }
+          handleResponse(response)
+        })
+        .on('error', (_e: any) => {
+          fileStream.close()
+          resolve(null)
+        })
     })
   } catch (error) {
     console.error('Error ensuring ffmpeg:', error)
@@ -1130,45 +1236,51 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
     const downloadPath = savePath || appSettings.downloadPath
 
     // USE PLUGIN SYSTEM
-    const plugin = pluginManager.getPlugin(url);
+    const plugin = pluginManager.getPlugin(url)
 
     // Default Routing Logic (if no plugin found)
-    let strategy = 'direct';
-    let platformName = 'Direct';
+    let strategy = 'direct'
+    let platformName = 'Direct'
 
     if (plugin) {
-      console.log(`[DEBUG] Plugin Matched: ${plugin.name} `);
-      strategy = plugin.getStrategy(url);
-      platformName = plugin.name;
+      console.log(`[DEBUG] Plugin Matched: ${plugin.name} `)
+      strategy = plugin.getStrategy(url)
+      platformName = plugin.name
 
       // Optional: prepare context (headers)
       if (plugin.prepare) {
-        const context = await plugin.prepare({ url, headers: queuedItem.headers, savePath: downloadPath });
-        queuedItem.headers = context.headers; // Update headers if modified
+        const context = await plugin.prepare({
+          url,
+          headers: queuedItem.headers,
+          savePath: downloadPath
+        })
+        queuedItem.headers = context.headers // Update headers if modified
       }
     } else {
       // Fallback to legacy isSocialMediaURL check for non-plugin sites
-      const { isSocial, platform } = isSocialMediaURL(url);
+      const { isSocial, platform } = isSocialMediaURL(url)
       if (isSocial) {
-        strategy = 'yt-dlp';
-        platformName = platform;
+        strategy = 'yt-dlp'
+        platformName = platform
       } else {
         // Check for likely video types
         const isDirectVideoLink =
           queuedItem.mimeType?.includes('video/') ||
           queuedItem.mimeType?.includes('application/octet-stream') ||
           url.match(/\.(mp4|webm|m4v|mkv|avi|mov|flv|wmv|ts|m3u8)(\?|$)/i) ||
-          url.includes('/video/');
+          url.includes('/video/')
 
         if (isDirectVideoLink) {
           // For unknown direct video links, multi-threading is usually good unless it's a stream
           // But let's stick to default 'direct' (multi-threading)
-          strategy = 'direct';
+          strategy = 'direct'
         }
       }
     }
 
-    console.log(`[DEBUG] Routing decision for ${url}: Strategy = ${strategy}, Platform = ${platformName} `);
+    console.log(
+      `[DEBUG] Routing decision for ${url}: Strategy = ${strategy}, Platform = ${platformName} `
+    )
 
     const tracker: DownloadTracker = {
       item: null,
@@ -1191,12 +1303,18 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
 
     if (strategy === 'yt-dlp') {
       console.log(`[DEBUG] Starting Plugin Download(${platformName}) via yt - dlp...`)
-      await downloadWithYtDlp(url, downloadPath, platformName, mainWindow, undefined, tracker.filename)
+      await downloadWithYtDlp(
+        url,
+        downloadPath,
+        platformName,
+        mainWindow,
+        undefined,
+        tracker.filename
+      )
     } else {
       console.log('[DEBUG] Starting Direct Download (Multi-threading)...')
       await downloadWithMultiThreading(url, downloadPath, mainWindow)
     }
-
   } catch (error: any) {
     console.error('Error starting download from queue:', error)
 
@@ -1208,7 +1326,9 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
         const retryDelay = Math.min(1000 * Math.pow(2, tracker.retryCount), 30000) // Max 30 secondes
         tracker.retryCount++
 
-        console.log(`Retrying download ${url} (attempt ${tracker.retryCount}/${tracker.maxRetries}) after ${retryDelay} ms`)
+        console.log(
+          `Retrying download ${url} (attempt ${tracker.retryCount}/${tracker.maxRetries}) after ${retryDelay} ms`
+        )
 
         setTimeout(() => {
           // Réajouter à la queue avec priorité plus élevée
@@ -1232,11 +1352,7 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
       url,
       error: errorMessage
     })
-    sendNotification(
-      'Erreur de téléchargement',
-      `Échec du téléchargement: ${errorMessage} `,
-      false
-    )
+    sendNotification('Erreur de téléchargement', `Échec du téléchargement: ${errorMessage} `, false)
     handleDownloadEnd(url)
   }
   // Note: handleDownloadEnd est appelé dans downloadWithYtDlp/downloadWithMultiThreading
@@ -1288,7 +1404,7 @@ function addToDownloadQueue(
   audioOnly: boolean = false
 ) {
   // Vérifier si déjà dans la queue ou actif
-  if (downloadQueue.some(item => item.url === url) || activeDownloads.has(url)) {
+  if (downloadQueue.some((item) => item.url === url) || activeDownloads.has(url)) {
     console.log('Download already queued or active:', url)
     return
   }
@@ -1311,7 +1427,7 @@ function addToDownloadQueue(
 
   // NOTIFY FRONTEND - Immediate update
   // Check if filename is known or default
-  const name = filename || (url.split('/').pop()?.split('?')[0] || 'unknown-file')
+  const name = filename || url.split('/').pop()?.split('?')[0] || 'unknown-file'
 
   mainWindow.webContents.send('download-started', {
     url,
@@ -1355,24 +1471,24 @@ async function stopDownload(url: string) {
     if (tracker.process) {
       try {
         if (process.platform === 'win32' && tracker.process.pid) {
-          const { exec } = require('child_process');
-          exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => { });
+          const { exec } = require('child_process')
+          exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => {})
         } else {
-          tracker.process.kill('SIGKILL');
+          tracker.process.kill('SIGKILL')
         }
-        tracker.process = undefined;
+        tracker.process = undefined
       } catch (e) {
         console.error('Error killing process:', e)
       }
     }
     if (tracker.httpRequests) {
-      tracker.httpRequests.forEach(req => req.destroy())
+      tracker.httpRequests.forEach((req) => req.destroy())
     }
     activeDownloads.delete(url)
     if (activeDownloadCount > 0) activeDownloadCount--
 
     // Notify frontend
-    const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed())
+    const mainWindow = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
     if (mainWindow) {
       mainWindow.webContents.send('download-cancelled', { url })
     }
@@ -1382,17 +1498,24 @@ async function stopDownload(url: string) {
 }
 
 // Fonction de téléchargement utilisant yt-dlp
-async function downloadWithYtDlp(url: string, savePath: string, _platform: string, win: BrowserWindow, formatId?: string, customFilename?: string, isRetry: boolean = false) {
-  let cookieFile: string | null = null; // Declare at function scope for cleanup in catch/finally
+async function downloadWithYtDlp(
+  url: string,
+  savePath: string,
+  _platform: string,
+  win: BrowserWindow,
+  formatId?: string,
+  customFilename?: string,
+  isRetry: boolean = false
+) {
+  let cookieFile: string | null = null // Declare at function scope for cleanup in catch/finally
 
   try {
-
     // Get headers from tracker
     const tracker = activeDownloads.get(url)
     const requestHeaders = tracker?.headers || {}
 
     // Obtenir le chemin de yt-dlp
-    let finalYtDlpPath = ensureYtDlpAvailable();
+    const finalYtDlpPath = ensureYtDlpAvailable()
 
     if (finalYtDlpPath) {
       // Vérifier si ffmpeg est disponible
@@ -1402,41 +1525,46 @@ async function downloadWithYtDlp(url: string, savePath: string, _platform: strin
       // Arguments de base pour yt-dlp
       const downloadArgs = [
         url,
-        '-o', join(savePath, customFilename || '%(title)s.%(ext)s'), // Use custom filename if provided
+        '-o',
+        join(savePath, customFilename || '%(title)s.%(ext)s'), // Use custom filename if provided
         '--newline', // Important for parsing output
         '--no-mtime', // Ne pas restaurer la date de modif (perf Windows)
         '--continue', // CRITIQUE: Force la reprise des fichiers partiellement téléchargés
         '--no-playlist', // CRITIQUE: Télécharger UNIQUEMENT la vidéo spécifiée, pas toute la playlist
-        '-N', '8', // BOOST: 8 connexions simultanées (Style IDM) pour max de vitesse
-        '--http-chunk-size', '10M' // Gros chunks pour disque rapide
+        '-N',
+        '8', // BOOST: 8 connexions simultanées (Style IDM) pour max de vitesse
+        '--http-chunk-size',
+        '10M' // Gros chunks pour disque rapide
       ]
 
       // AUDIO CONVERSION LOGIC (MP3) - EXCLUSIVE PATH
-
 
       // AUDIO CONVERSION LOGIC (MP3) - EXCLUSIVE PATH
       if (tracker?.audioOnly) {
         // ... existing audio logic ...
         downloadArgs.push(
           '-x',
-          '--audio-format', 'mp3',
-          '--audio-quality', '0',
-          '-f', 'bestaudio/best'
-        );
-        if (hasFfmpeg && ffmpegPath) downloadArgs.push('--ffmpeg-location', ffmpegPath);
-        console.log('[yt-dlp] Audio Extraction Enabled (MP3) for:', url);
+          '--audio-format',
+          'mp3',
+          '--audio-quality',
+          '0',
+          '-f',
+          'bestaudio/best'
+        )
+        if (hasFfmpeg && ffmpegPath) downloadArgs.push('--ffmpeg-location', ffmpegPath)
+        console.log('[yt-dlp] Audio Extraction Enabled (MP3) for:', url)
       }
       // CUSTOM FORMAT ID (from Quality Selector)
       else if (formatId) {
-        downloadArgs.push('-f', `${formatId} +bestaudio / best`);
-        if (hasFfmpeg && ffmpegPath) downloadArgs.push('--ffmpeg-location', ffmpegPath);
-        downloadArgs.push('--merge-output-format', 'mp4');
-        console.log(`[yt - dlp] Using custom format: ${formatId} `);
+        downloadArgs.push('-f', `${formatId} +bestaudio / best`)
+        if (hasFfmpeg && ffmpegPath) downloadArgs.push('--ffmpeg-location', ffmpegPath)
+        downloadArgs.push('--merge-output-format', 'mp4')
+        console.log(`[yt - dlp] Using custom format: ${formatId} `)
       }
       // DEFAULT VIDEO LOGIC - v19: Maximum Quality
       else {
         // Detect if it's YouTube for special handling
-        const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+        const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
 
         if (isYouTube) {
           // YouTube: Prioritize 1080p+ with best audio, fallback to best available
@@ -1445,65 +1573,71 @@ async function downloadWithYtDlp(url: string, savePath: string, _platform: strin
           // 2. bestvideo[ext=mp4]+bestaudio[ext=m4a] - Any MP4 video with M4A audio
           // 3. bestvideo+bestaudio - Best video/audio in any format (will be merged)
           // 4. best - Single file with best quality (no merge needed)
-          downloadArgs.push('-f', 'bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best');
-          console.log('[yt-dlp] YouTube: Using high-quality format (1080p+ preferred)');
+          downloadArgs.push(
+            '-f',
+            'bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+          )
+          console.log('[yt-dlp] YouTube: Using high-quality format (1080p+ preferred)')
         } else {
           // Other platforms: Use best available video+audio
-          downloadArgs.push('-f', 'bestvideo+bestaudio/best');
-          console.log('[yt-dlp] Using best available quality');
+          downloadArgs.push('-f', 'bestvideo+bestaudio/best')
+          console.log('[yt-dlp] Using best available quality')
         }
 
         if (hasFfmpeg && ffmpegPath) {
-          downloadArgs.push('--ffmpeg-location', ffmpegPath);
-          downloadArgs.push('--merge-output-format', 'mp4'); // Ensure final output is MP4
+          downloadArgs.push('--ffmpeg-location', ffmpegPath)
+          downloadArgs.push('--merge-output-format', 'mp4') // Ensure final output is MP4
         }
       }
       // [DEBUG] V4: Robust extraction strategy
-      console.log(`[yt-dlp] Preparing download for ${url} (Strategy: yt-dlp)`);
+      console.log(`[yt-dlp] Preparing download for ${url} (Strategy: yt-dlp)`)
 
       // [V18 FIX] Robust Cookie Authentication for Social Media
       // Problem: --cookies-from-browser chrome fails if Chrome is running (locks database)
       // Solution: Generate a PROPER Netscape cookie file from the Cookie header
-      const isSocialPlatform = url.includes('tiktok.com') || url.includes('instagram.com') ||
-        url.includes('facebook.com') || url.includes('twitter.com');
+      const isSocialPlatform =
+        url.includes('tiktok.com') ||
+        url.includes('instagram.com') ||
+        url.includes('facebook.com') ||
+        url.includes('twitter.com')
 
       if (isSocialPlatform && requestHeaders['Cookie']) {
         try {
           // Extract domain from URL
-          const urlObj = new URL(url);
-          const domain = urlObj.hostname;
+          const urlObj = new URL(url)
+          const domain = urlObj.hostname
 
           // Create proper Netscape cookie file
-          const cookieTempPath = join(app.getPath('temp'), `cookies_${Date.now()}.txt`);
-          let netscapeContent = '# Netscape HTTP Cookie File\n';
-          netscapeContent += '# This is a generated file! Do not edit.\n\n';
+          const cookieTempPath = join(app.getPath('temp'), `cookies_${Date.now()}.txt`)
+          let netscapeContent = '# Netscape HTTP Cookie File\n'
+          netscapeContent += '# This is a generated file! Do not edit.\n\n'
 
           // Parse Cookie header and convert to Netscape format
-          const cookies = requestHeaders['Cookie'].split(';').map(c => c.trim());
-          const expiration = Math.floor(Date.now() / 1000) + 86400; // 24h from now
+          const cookies = requestHeaders['Cookie'].split(';').map((c) => c.trim())
+          const expiration = Math.floor(Date.now() / 1000) + 86400 // 24h from now
 
           for (const cookie of cookies) {
-            const [name, ...valueParts] = cookie.split('=');
-            const value = valueParts.join('='); // Handle values with '='
+            const [name, ...valueParts] = cookie.split('=')
+            const value = valueParts.join('=') // Handle values with '='
             if (name && value) {
               // Format: domain, flag, path, secure, expiration, name, value
-              netscapeContent += `${domain}\tTRUE\t/\tFALSE\t${expiration}\t${name}\t${value}\n`;
+              netscapeContent += `${domain}\tTRUE\t/\tFALSE\t${expiration}\t${name}\t${value}\n`
             }
           }
 
-          await fsPromises.writeFile(cookieTempPath, netscapeContent);
-          cookieFile = cookieTempPath;
-          console.log('[yt-dlp] Generated Netscape cookie file for social media authentication');
-          downloadArgs.push('--cookies', cookieFile);
+          await fsPromises.writeFile(cookieTempPath, netscapeContent)
+          cookieFile = cookieTempPath
+          console.log('[yt-dlp] Generated Netscape cookie file for social media authentication')
+          downloadArgs.push('--cookies', cookieFile)
         } catch (err) {
-          console.error('[yt-dlp] Failed to generate cookie file:', err);
+          console.error('[yt-dlp] Failed to generate cookie file:', err)
           // Fallback: try without cookies
         }
       } else if (Object.keys(requestHeaders).length > 0 && !isSocialPlatform) {
         // For non-social sites (YouTube, etc.), direct headers work fine
-        console.log('[yt-dlp] Passing session headers directly');
+        console.log('[yt-dlp] Passing session headers directly')
         for (const key in requestHeaders) {
-          downloadArgs.push('--add-header', `${key}:${requestHeaders[key]}`);
+          downloadArgs.push('--add-header', `${key}:${requestHeaders[key]}`)
         }
       }
 
@@ -1514,14 +1648,14 @@ async function downloadWithYtDlp(url: string, savePath: string, _platform: strin
       // 3. They block HTTPS formats
       // Solution: Let yt-dlp use the default web client which supports cookies and HD
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        console.log('[yt-dlp] Using default web client for best HD quality with cookie support');
+        console.log('[yt-dlp] Using default web client for best HD quality with cookie support')
         // No client restriction - yt-dlp will use the best available client
       }
 
-      console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '));
+      console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '))
 
       // Emit START event to ensure UI registers the item in the list
-      const initialFilename = customFilename || 'Fetching info...';
+      const initialFilename = customFilename || 'Fetching info...'
       win.webContents.send('download-started', {
         url: url,
         name: initialFilename,
@@ -1533,88 +1667,91 @@ async function downloadWithYtDlp(url: string, savePath: string, _platform: strin
         createdAt: Date.now(),
         savePath: savePath,
         canResume: true // ALWAYS allow resume for yt-dlp
-      });
+      })
 
       // v20: Cross-platform Node.js PATH injection for signature solving
-      const env = { ...process.env };
-      const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') || 'PATH';
+      const env = { ...process.env }
+      const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') || 'PATH'
 
-      const isWindows = process.platform === 'win32';
-      const isMac = process.platform === 'darwin';
-      const nodeBinary = isWindows ? 'node.exe' : 'node';
+      const isWindows = process.platform === 'win32'
+      const isMac = process.platform === 'darwin'
+      const nodeBinary = isWindows ? 'node.exe' : 'node'
 
-      const possibleNodeDirs = isWindows ? [
-        'C:\\Program Files\\nodejs',
-        join(process.resourcesPath, 'node'),
-        dirname(process.execPath)
-      ] : isMac ? [
-        '/opt/homebrew/bin', // Apple Silicon
-        '/usr/local/bin', // Intel Mac
-        '/usr/bin'
-      ] : [
-        '/usr/bin',
-        '/usr/local/bin'
-      ];
+      const possibleNodeDirs = isWindows
+        ? [
+            'C:\\Program Files\\nodejs',
+            join(process.resourcesPath, 'node'),
+            dirname(process.execPath)
+          ]
+        : isMac
+          ? [
+              '/opt/homebrew/bin', // Apple Silicon
+              '/usr/local/bin', // Intel Mac
+              '/usr/bin'
+            ]
+          : ['/usr/bin', '/usr/local/bin']
 
       // Find and add Node.js to PATH if found
       for (const dir of possibleNodeDirs) {
         if (existsSync(join(dir, nodeBinary))) {
-          env[pathKey] = `${dir}${process.platform === 'win32' ? ';' : ':'}${env[pathKey]}`;
-          break;
+          env[pathKey] = `${dir}${process.platform === 'win32' ? ';' : ':'}${env[pathKey]}`
+          break
         }
       }
 
-      env['YTDLP_JS_ENGINE'] = 'node';
+      env['YTDLP_JS_ENGINE'] = 'node'
 
-      const ytDlpProcess = spawn(finalYtDlpPath, downloadArgs, { env });
+      const ytDlpProcess = spawn(finalYtDlpPath, downloadArgs, { env })
 
-      let output = '';
-      let stdoutBuffer = '';
-      let errorOutput = '';
-      let filename = customFilename || 'unknown'; // Default filename
-      let killTimeout: NodeJS.Timeout | null = null; // Safety timeout
-      let wasKilledByTimeout = false;
+      let output = ''
+      let stdoutBuffer = ''
+      let errorOutput = ''
+      let filename = customFilename || 'unknown' // Default filename
+      let killTimeout: NodeJS.Timeout | null = null // Safety timeout
+      let wasKilledByTimeout = false
 
       ytDlpProcess.stdout.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        stdoutBuffer += chunk;
+        const chunk = data.toString()
+        output += chunk
+        stdoutBuffer += chunk
 
-        const lines = stdoutBuffer.split('\n');
+        const lines = stdoutBuffer.split('\n')
         // Keep the last partial line in the buffer
-        stdoutBuffer = lines.pop() || '';
+        stdoutBuffer = lines.pop() || ''
 
         for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine) continue;
+          const trimmedLine = line.trim()
+          if (!trimmedLine) continue
 
           // Extract filename from yt-dlp output if not custom
           if (!customFilename) {
-            const filenameMatch = trimmedLine.match(/\[download\] Destination: (.+)/);
+            const filenameMatch = trimmedLine.match(/\[download\] Destination: (.+)/)
             if (filenameMatch && filenameMatch[1]) {
-              filename = basename(filenameMatch[1]);
+              filename = basename(filenameMatch[1])
             }
           }
 
           // Parse progress
           // Parse progress - Updated regex to handle "~" (approximate size) and variable spacing
-          const progressMatch = trimmedLine.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+[~]?\s*(\S+)\s+at\s+(\S+)\s+ETA\s+(\S+)/);
+          const progressMatch = trimmedLine.match(
+            /\[download\]\s+(\d+\.?\d*)%\s+of\s+[~]?\s*(\S+)\s+at\s+(\S+)\s+ETA\s+(\S+)/
+          )
           if (progressMatch) {
-            const progress = parseFloat(progressMatch[1]);
-            const totalSizeStr = progressMatch[2];
-            const speedStr = progressMatch[3];
-            const eta = progressMatch[4];
+            const progress = parseFloat(progressMatch[1])
+            const totalSizeStr = progressMatch[2]
+            const speedStr = progressMatch[3]
+            const eta = progressMatch[4]
 
-            const totalBytes = parseSizeToBytes(totalSizeStr);
-            const receivedBytes = (progress / 100) * totalBytes;
-            const speed = parseSizeToBytes(speedStr.split('/')[0]);
+            const totalBytes = parseSizeToBytes(totalSizeStr)
+            const receivedBytes = (progress / 100) * totalBytes
+            const speed = parseSizeToBytes(speedStr.split('/')[0])
 
             // Sync state to tracker for reliable resume
-            const tracker = activeDownloads.get(url);
+            const tracker = activeDownloads.get(url)
             if (tracker) {
-              tracker.lastProgress = Math.round(progress);
-              tracker.lastBytes = receivedBytes;
-              tracker.filename = filename;
+              tracker.lastProgress = Math.round(progress)
+              tracker.lastBytes = receivedBytes
+              tracker.filename = filename
             }
 
             win.webContents.send('download-progress', {
@@ -1628,15 +1765,17 @@ async function downloadWithYtDlp(url: string, savePath: string, _platform: strin
               originalUrl: url,
               canResume: true, // Always allow resume UI
               filename: filename
-            });
+            })
           } else if (trimmedLine.includes('[download] 100% of')) {
             // Sync state for 100% case
-            const tracker = activeDownloads.get(url);
-            const totalBytesFromLine = parseSizeToBytes(trimmedLine.match(/of (\d+\.\d+\w+)/)?.[1] || '0B');
+            const tracker = activeDownloads.get(url)
+            const totalBytesFromLine = parseSizeToBytes(
+              trimmedLine.match(/of (\d+\.\d+\w+)/)?.[1] || '0B'
+            )
             if (tracker) {
-              tracker.lastProgress = 100;
-              tracker.lastBytes = totalBytesFromLine;
-              tracker.filename = filename;
+              tracker.lastProgress = 100
+              tracker.lastBytes = totalBytesFromLine
+              tracker.filename = filename
             }
 
             win.webContents.send('download-progress', {
@@ -1650,25 +1789,25 @@ async function downloadWithYtDlp(url: string, savePath: string, _platform: strin
               originalUrl: url,
               canResume: true, // Always allow resume UI
               filename: filename
-            });
+            })
 
             // SAFETY: Force-kill yt-dlp if it doesn't exit within 10 seconds after reaching 100%
             if (!killTimeout) {
               killTimeout = setTimeout(() => {
-                wasKilledByTimeout = true;
-                console.warn(`[yt-dlp] Process did not exit after 100%, force-killing for ${url}`);
+                wasKilledByTimeout = true
+                console.warn(`[yt-dlp] Process did not exit after 100%, force-killing for ${url}`)
 
                 try {
                   // CRITICAL FIX: Mark as complete IMMEDIATELY, don't wait for process to close
                   // (On Windows, the close event may never fire after SIGKILL)
-                  const finalFilePath = join(savePath, filename);
+                  const finalFilePath = join(savePath, filename)
 
-                  let fileSize = 0;
+                  let fileSize = 0
                   try {
-                    const stats = fs.statSync(finalFilePath);
-                    fileSize = stats.size;
+                    const stats = fs.statSync(finalFilePath)
+                    fileSize = stats.size
                   } catch (e) {
-                    console.error('Could not get file stats after timeout kill:', e);
+                    console.error('Could not get file stats after timeout kill:', e)
                   }
 
                   // Send completion event to UI
@@ -1677,68 +1816,72 @@ async function downloadWithYtDlp(url: string, savePath: string, _platform: strin
                     filePath: finalFilePath,
                     filename: filename,
                     totalBytes: fileSize
-                  });
-                  sendNotification('Téléchargement terminé', `${filename} a été téléchargé avec succès`, true);
+                  })
+                  sendNotification(
+                    'Téléchargement terminé',
+                    `${filename} a été téléchargé avec succès`,
+                    true
+                  )
 
                   // Clean up and prevent retry
-                  handleDownloadEnd(url);
+                  handleDownloadEnd(url)
 
                   // Try to kill process (but don't rely on it)
                   try {
                     if (process.platform === 'win32' && ytDlpProcess.pid) {
-                      const { exec } = require('child_process');
-                      exec(`taskkill /F /T /PID ${ytDlpProcess.pid}`, () => { });
+                      const { exec } = require('child_process')
+                      exec(`taskkill /F /T /PID ${ytDlpProcess.pid}`, () => {})
                     } else {
-                      ytDlpProcess.kill('SIGKILL');
+                      ytDlpProcess.kill('SIGKILL')
                     }
                   } catch (e) {
-                    console.error('Error killing process after timeout:', e);
+                    console.error('Error killing process after timeout:', e)
                   }
                 } catch (err) {
-                  console.error(`[ERROR] Exception in timeout callback:`, err);
+                  console.error(`[ERROR] Exception in timeout callback:`, err)
                 }
-              }, 10000);
+              }, 10000)
             }
           }
         }
-      });
+      })
 
       ytDlpProcess.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-        console.error(`[yt - dlp] stderr: ${data.toString()} `);
-      });
+        errorOutput += data.toString()
+        console.error(`[yt - dlp] stderr: ${data.toString()} `)
+      })
 
       ytDlpProcess.on('close', (code) => {
         // Clear safety timeout if it exists
         if (killTimeout) {
-          clearTimeout(killTimeout);
-          killTimeout = null;
+          clearTimeout(killTimeout)
+          killTimeout = null
         }
 
         // CRITICAL: If timeout already handled completion, do nothing here
         if (wasKilledByTimeout) {
-          console.log(`[yt-dlp] Close event ignored, already handled by timeout for ${url}`);
-          return; // Exit early, don't process anything
+          console.log(`[yt-dlp] Close event ignored, already handled by timeout for ${url}`)
+          return // Exit early, don't process anything
         }
 
         // Normal completion or failure handling
         if (code === 0) {
           // ... success handling ...
           if (!customFilename) {
-            const finalFilenameMatch = output.match(/\[download\] Destination: (.+)/g);
+            const finalFilenameMatch = output.match(/\[download\] Destination: (.+)/g)
             if (finalFilenameMatch && finalFilenameMatch.length > 0) {
-              filename = basename(finalFilenameMatch[finalFilenameMatch.length - 1]);
+              filename = basename(finalFilenameMatch[finalFilenameMatch.length - 1])
             }
           }
-          const finalFilePath = join(savePath, filename);
+          const finalFilePath = join(savePath, filename)
 
           // Get actual file size
-          let fileSize = 0;
+          let fileSize = 0
           try {
-            const stats = fs.statSync(finalFilePath);
-            fileSize = stats.size;
+            const stats = fs.statSync(finalFilePath)
+            fileSize = stats.size
           } catch (e) {
-            console.error('Could not get file stats:', e);
+            console.error('Could not get file stats:', e)
           }
 
           win.webContents.send('download-complete', {
@@ -1746,86 +1889,91 @@ async function downloadWithYtDlp(url: string, savePath: string, _platform: strin
             filePath: finalFilePath,
             filename: filename,
             totalBytes: fileSize
-          });
-          sendNotification('Téléchargement terminé', `${filename} a été téléchargé avec succès`, true);
+          })
+          sendNotification(
+            'Téléchargement terminé',
+            `${filename} a été téléchargé avec succès`,
+            true
+          )
         } else {
           // CHECK IF PAUSED: Don't show error if the user manually paused it
-          const tracker = activeDownloads.get(url);
+          const tracker = activeDownloads.get(url)
           if (tracker?.paused) {
-            console.log(`[yt-dlp] Process exited with code ${code} (Manual Pause) for ${url}`);
+            console.log(`[yt-dlp] Process exited with code ${code} (Manual Pause) for ${url}`)
             // UI already knows it's paused because we send download-paused in the IPC handler
-            return;
+            return
           }
 
           // SMART RETRY: If YouTube Extraction failed with cookies, retry WITHOUT cookies
-          const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+          const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
           if (isYouTube && !isRetry && !tracker?.paused) {
-            console.log(`[yt-dlp] YouTube with headers failed, attempting automatic retry WITHOUT headers for ${url}`);
+            console.log(
+              `[yt-dlp] YouTube with headers failed, attempting automatic retry WITHOUT headers for ${url}`
+            )
 
             // Retry: call same function with isRetry = true and nullify headers to avoid cookies
-            const newTracker = activeDownloads.get(url);
+            const newTracker = activeDownloads.get(url)
             if (newTracker) {
-              newTracker.headers = { 'User-Agent': requestHeaders['User-Agent'] || 'Mozilla/5.0' };
-              downloadWithYtDlp(url, savePath, _platform, win, formatId, customFilename, true);
-              return; // Skip error reporting
+              newTracker.headers = { 'User-Agent': requestHeaders['User-Agent'] || 'Mozilla/5.0' }
+              downloadWithYtDlp(url, savePath, _platform, win, formatId, customFilename, true)
+              return // Skip error reporting
             }
           }
 
-          console.error(`[yt - dlp] Download failed for ${url} with code ${code}: ${errorOutput} `);
-          win.webContents.send('download-error', { url, error: `yt - dlp failed: ${errorOutput} ` });
+          console.error(`[yt - dlp] Download failed for ${url} with code ${code}: ${errorOutput} `)
+          win.webContents.send('download-error', { url, error: `yt - dlp failed: ${errorOutput} ` })
         }
-        handleDownloadEnd(url);
-      });
+        handleDownloadEnd(url)
+      })
 
       ytDlpProcess.on('error', (err) => {
-        console.error(`[yt - dlp] Failed to start yt - dlp process for ${url}: ${err.message} `);
-        win.webContents.send('download-error', { url, error: `Failed to start yt - dlp: ${err.message} ` });
-        handleDownloadEnd(url);
-      });
+        console.error(`[yt - dlp] Failed to start yt - dlp process for ${url}: ${err.message} `)
+        win.webContents.send('download-error', {
+          url,
+          error: `Failed to start yt - dlp: ${err.message} `
+        })
+        handleDownloadEnd(url)
+      })
 
       // Store the process to allow cancellation/pause
-      const trackerRef = activeDownloads.get(url);
+      const trackerRef = activeDownloads.get(url)
       if (trackerRef) {
-        trackerRef.process = ytDlpProcess;
+        trackerRef.process = ytDlpProcess
       }
-
     } else {
-      throw new Error('yt-dlp executable not found.');
+      throw new Error('yt-dlp executable not found.')
     }
   } catch (error: any) {
-    console.error('Error in downloadWithYtDlp:', error);
+    console.error('Error in downloadWithYtDlp:', error)
 
     // Cleanup temporary cookie file if it was created
     if (cookieFile) {
       try {
-        await fsPromises.unlink(cookieFile);
-        console.log('[yt-dlp] Cleaned up temporary cookie file');
-      } catch (e) {
+        await fsPromises.unlink(cookieFile)
+        console.log('[yt-dlp] Cleaned up temporary cookie file')
+      } catch (_e) {
         // Ignore cleanup errors
       }
     }
 
-    win.webContents.send('download-error', { url, error: error.message || 'yt-dlp download failed' });
-    handleDownloadEnd(url);
+    win.webContents.send('download-error', {
+      url,
+      error: error.message || 'yt-dlp download failed'
+    })
+    handleDownloadEnd(url)
   } finally {
     // Final cleanup: delete cookie file if it exists
     if (cookieFile) {
       try {
         if (existsSync(cookieFile)) {
-          await fsPromises.unlink(cookieFile);
+          await fsPromises.unlink(cookieFile)
         }
-      } catch (e) {
+      } catch (_e) {
         // Ignore cleanup errors
       }
     }
   }
 }
-
-
-
-
-
-
 
 // Serveur HTTP pour recevoir les téléchargements détectés par l'extension
 function startExtensionServer() {
@@ -1856,12 +2004,14 @@ function startExtensionServer() {
         'Content-Type': 'application/json',
         ...corsHeaders
       })
-      res.end(JSON.stringify({
-        status: 'ok',
-        app: 'DoulBrowser',
-        version: '1.0.0',
-        endpoints: ['/ping', '/download-detected']
-      }))
+      res.end(
+        JSON.stringify({
+          status: 'ok',
+          app: 'DoulBrowser',
+          version: '1.0.0',
+          endpoints: ['/ping', '/download-detected']
+        })
+      )
       return
     }
 
@@ -1924,7 +2074,7 @@ function startExtensionServer() {
 
           // Trouver la fenêtre principale
           const windows = BrowserWindow.getAllWindows()
-          const mainWindow = windows.find(w => !w.isDestroyed())
+          const mainWindow = windows.find((w) => !w.isDestroyed())
 
           if (!mainWindow) {
             res.writeHead(500, {
@@ -1936,9 +2086,9 @@ function startExtensionServer() {
           }
 
           // BRING TO FRONT - User wants to see the download
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.show();
-          mainWindow.focus();
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.show()
+          mainWindow.focus()
 
           // Quality Selector: DISABLED categorically for maximum speed (V17)
           // Direct download proceeds for all sites
@@ -1959,8 +2109,8 @@ function startExtensionServer() {
             data.headers || {}, // Pass headers
             // Déterminer si audio only
             (data.mimeType && data.mimeType.startsWith('audio/')) ||
-            (filename && filename.toLowerCase().endsWith('.mp3')) ||
-            false
+              (filename && filename.toLowerCase().endsWith('.mp3')) ||
+              false
           )
 
           console.log('✅ Download added to queue successfully')
@@ -1977,10 +2127,12 @@ function startExtensionServer() {
             'Content-Type': 'application/json',
             ...corsHeaders
           })
-          res.end(JSON.stringify({
-            error: error.message || 'Invalid JSON',
-            details: body ? 'Body received but parsing failed' : 'Empty body'
-          }))
+          res.end(
+            JSON.stringify({
+              error: error.message || 'Invalid JSON',
+              details: body ? 'Body received but parsing failed' : 'Empty body'
+            })
+          )
         }
       })
       return
@@ -2056,15 +2208,17 @@ function startExtensionServer() {
           }
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({
-            status: status,
-            progress: progress,
-            receivedBytes: receivedBytes,
-            totalBytes: totalBytes,
-            speed: speed, // Vitesse en bytes/seconde (nombre)
-            speedFormatted: speedStr, // Vitesse formatée (chaîne)
-            timeLeft: timeLeft
-          }))
+          res.end(
+            JSON.stringify({
+              status: status,
+              progress: progress,
+              receivedBytes: receivedBytes,
+              totalBytes: totalBytes,
+              speed: speed, // Vitesse en bytes/seconde (nombre)
+              speedFormatted: speedStr, // Vitesse formatée (chaîne)
+              timeLeft: timeLeft
+            })
+          )
         } else {
           res.writeHead(404, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Download not found' }))
@@ -2079,18 +2233,20 @@ function startExtensionServer() {
     // Endpoints pour pause/resume/cancel depuis l'extension
     if (url.pathname === '/download-pause' && req.method === 'POST') {
       let body = ''
-      req.on('data', (chunk) => { body += chunk.toString() })
+      req.on('data', (chunk) => {
+        body += chunk.toString()
+      })
       req.on('end', () => {
         try {
           const data = JSON.parse(body)
           const windows = BrowserWindow.getAllWindows()
-          const mainWindow = windows.find(w => !w.isDestroyed())
+          const mainWindow = windows.find((w) => !w.isDestroyed())
           if (mainWindow) {
             mainWindow.webContents.send('download-pause', data.url)
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
-        } catch (error) {
+        } catch (_error) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Invalid JSON' }))
         }
@@ -2100,18 +2256,20 @@ function startExtensionServer() {
 
     if (url.pathname === '/download-resume' && req.method === 'POST') {
       let body = ''
-      req.on('data', (chunk) => { body += chunk.toString() })
+      req.on('data', (chunk) => {
+        body += chunk.toString()
+      })
       req.on('end', () => {
         try {
           const data = JSON.parse(body)
           const windows = BrowserWindow.getAllWindows()
-          const mainWindow = windows.find(w => !w.isDestroyed())
+          const mainWindow = windows.find((w) => !w.isDestroyed())
           if (mainWindow) {
             mainWindow.webContents.send('download-resume', data.url)
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
-        } catch (error) {
+        } catch (_error) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Invalid JSON' }))
         }
@@ -2121,18 +2279,20 @@ function startExtensionServer() {
 
     if (url.pathname === '/download-cancel' && req.method === 'POST') {
       let body = ''
-      req.on('data', (chunk) => { body += chunk.toString() })
+      req.on('data', (chunk) => {
+        body += chunk.toString()
+      })
       req.on('end', () => {
         try {
           const data = JSON.parse(body)
           const windows = BrowserWindow.getAllWindows()
-          const mainWindow = windows.find(w => !w.isDestroyed())
+          const mainWindow = windows.find((w) => !w.isDestroyed())
           if (mainWindow) {
             mainWindow.webContents.send('download-cancel', data.url)
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
-        } catch (error) {
+        } catch (_error) {
           res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'Invalid JSON' }))
         }
@@ -2168,31 +2328,43 @@ app.whenReady().then(() => {
     app.setAppUserModelId('com.doulbrowser.app')
   }
 
+  console.log('[DEBUG] app.whenReady() triggered')
   // Load Settings
-  appSettings = loadSettings();
-  maxConcurrentDownloads = appSettings.maxConcurrentDownloads;
-
-  // AUTO-UPDATE YT-DLP: Check for updates at startup
-  autoUpdateYtDlp();
+  appSettings = loadSettings()
+  maxConcurrentDownloads = appSettings.maxConcurrentDownloads
 
   // Activer l'extension de capture de téléchargements (style IDM)
   try {
-    // ALWAYS load from source to avoid caching issues
-    // This ensures extension updates are immediately reflected
-    const extensionPath = join(__dirname, '..', '..', '..', 'extension_clean');
+    // v20: Robust extension path detection
+    const possiblePaths = [
+      join(__dirname, '..', '..', '..', 'extension_clean'), // Dev: logi/src/main -> logi/extension_clean
+      join(process.resourcesPath, 'extension_clean'), // Prod: resources/extension_clean
+      join(app.getAppPath(), 'extension_clean'), // Fallback
+      join(app.getAppPath(), '..', 'extension_clean'), // Fallback 2
+      'C:\\Users\\ABDOUL JABBAR\\Desktop\\Nouveau dossier\\logi\\extension_clean' // Direct path fallback
+    ]
 
-    console.log('Loading extension from:', extensionPath);
+    let extensionPath = ''
+    for (const p of possiblePaths) {
+      if (existsSync(p)) {
+        extensionPath = p
+        break
+      }
+    }
 
-    if (existsSync(extensionPath)) {
-      // Use session imported from electron
-      session.defaultSession.loadExtension(extensionPath, { allowFileAccess: true })
-        .then(() => console.log('Extension loaded successfully'))
-        .catch(err => console.error('Failed to load extension:', err));
+    console.log('Loading extension from:', extensionPath || 'NOT FOUND')
+
+    if (extensionPath && existsSync(extensionPath)) {
+      // v20: Use modern API session.extensions.loadExtension
+      session.defaultSession.extensions
+        .loadExtension(extensionPath, { allowFileAccess: true })
+        .then((ext) => console.log('Extension loaded successfully:', ext.name))
+        .catch((err) => console.error('Failed to load extension:', err))
     } else {
-      console.error('Extension not found at:', extensionPath);
+      console.error('Extension not found in any of the possible paths.')
     }
   } catch (err) {
-    console.error('Error loading extension:', err);
+    console.error('Error loading extension:', err)
   }
 
   // Configurer l'auto-démarrage selon les paramètres
@@ -2213,12 +2385,12 @@ app.whenReady().then(() => {
 
   // IPC Handler for custom downloads (from Quality Selector)
   ipcMain.on('start-download-custom', async (event, { url, formatId, filename, audioOnly }) => {
-    const mainWindow = BrowserWindow.fromWebContents(event.sender);
-    if (!mainWindow) return;
+    const mainWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!mainWindow) return
 
     if (audioOnly) {
       // Create/Update tracker with audio flag
-      let tracker = activeDownloads.get(url);
+      let tracker = activeDownloads.get(url)
       if (!tracker) {
         tracker = {
           item: null, // Fix lint: required property
@@ -2228,23 +2400,30 @@ app.whenReady().then(() => {
           lastTime: Date.now(),
           audioOnly: true,
           strategy: 'yt-dlp'
-        };
-        activeDownloads.set(url, tracker);
+        }
+        activeDownloads.set(url, tracker)
       } else {
-        tracker.audioOnly = true;
+        tracker.audioOnly = true
       }
     }
 
     // Delegate to yt-dlp with specific format
-    await downloadWithYtDlp(url, appSettings.downloadPath, 'Generic', mainWindow, formatId, filename);
-  });
+    await downloadWithYtDlp(
+      url,
+      appSettings.downloadPath,
+      'Generic',
+      mainWindow,
+      formatId,
+      filename
+    )
+  })
 
   // Handle get-video-info for Quality Selector
   ipcMain.handle('get-video-info', async (_event, url: string) => {
     try {
-      const info = await fetchVideoInfo(url);
+      const info = await fetchVideoInfo(url)
 
-      const allFormats = info.formats || [];
+      const allFormats = info.formats || []
 
       // Video formats (those with video codec)
       const videoFormats = allFormats
@@ -2259,7 +2438,7 @@ app.whenReady().then(() => {
           vcodec: f.vcodec,
           acodec: f.acodec
         }))
-        .sort((a: any, b: any) => b.height - a.height); // Highest resolution first
+        .sort((a: any, b: any) => b.height - a.height) // Highest resolution first
 
       // Audio formats (those with audio codec and NO video)
       const audioFormats = allFormats
@@ -2271,7 +2450,7 @@ app.whenReady().then(() => {
           abr: f.abr || 0,
           note: f.format_note || ''
         }))
-        .sort((a: any, b: any) => b.abr - a.abr);
+        .sort((a: any, b: any) => b.abr - a.abr)
 
       return {
         title: info.title,
@@ -2279,12 +2458,12 @@ app.whenReady().then(() => {
         duration: info.duration,
         videoFormats,
         audioFormats
-      };
+      }
     } catch (error: any) {
-      console.error('[IPC] get-video-info error:', error);
-      throw error;
+      console.error('[IPC] get-video-info error:', error)
+      throw error
     }
-  });
+  })
 
   ipcMain.on('download-start', async (event, url: string, savePath?: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -2297,14 +2476,16 @@ app.whenReady().then(() => {
 
       // Determine if audio only based on simple heuristic (if user provides direct mp3 link OR filename has .mp3)
       // For manual input, we can't easily guess so we default to false (Video) unless obvious
-      const isAudio = url.toLowerCase().includes('.mp3') || url.toLowerCase().includes('.m4a') || url.toLowerCase().includes('soundcloud.com');
+      const isAudio =
+        url.toLowerCase().includes('.mp3') ||
+        url.toLowerCase().includes('.m4a') ||
+        url.toLowerCase().includes('soundcloud.com')
 
-      console.log(`[Manual Download] Processing: ${url}, Audio Detected: ${isAudio}`);
+      console.log(`[Manual Download] Processing: ${url}, Audio Detected: ${isAudio}`)
 
       // NEW LOGIC: Check for YouTube and trigger Quality Selector (Manual Add)
       // REMOVED: Manual YouTube Quality Selector trigger
       // Now YouTube URLs will fall through to addToDownloadQueue and be handled by the YouTubePlugin (Direct Download)
-
 
       addToDownloadQueue(
         url,
@@ -2345,7 +2526,7 @@ app.whenReady().then(() => {
       tracker.paused = true
       tracker.cancelled = false
       // Annuler toutes les requêtes HTTP
-      tracker.httpRequests.forEach(req => {
+      tracker.httpRequests.forEach((req) => {
         try {
           req.destroy()
         } catch (error) {
@@ -2385,7 +2566,7 @@ app.whenReady().then(() => {
             // Sur Windows, utiliser taskkill pour forcer l'arrêt
             if (process.platform === 'win32' && tracker.process.pid) {
               const { exec } = require('child_process')
-              exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => { })
+              exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => {})
             } else {
               tracker.process.kill('SIGKILL')
             }
@@ -2413,23 +2594,23 @@ app.whenReady().then(() => {
   })
 
   ipcMain.on('download-resume', (event, url: string, savePath?: string, filename?: string) => {
-    console.log(`[IPC] download-resume received for: ${url}`);
+    console.log(`[IPC] download-resume received for: ${url}`)
     let tracker = activeDownloads.get(url)
     const win = BrowserWindow.fromWebContents(event.sender)
 
     // If tracker is missing (e.g. after error/restart), try to recreate it
     if (!tracker && savePath) {
-      console.log(`[Resume] Tracker missing for ${url}, recreating...`);
+      console.log(`[Resume] Tracker missing for ${url}, recreating...`)
 
       // Determine strategy again using the same routing logic as startDownloadFromQueue
-      let strategy: 'yt-dlp' | 'direct' | 'electron' = 'direct';
-      const plugin = pluginManager.getPlugin(url);
+      let strategy: 'yt-dlp' | 'direct' | 'electron' = 'direct'
+      const plugin = pluginManager.getPlugin(url)
       if (plugin) {
-        const strat = plugin.getStrategy(url);
-        strategy = strat === 'yt-dlp' ? 'yt-dlp' : 'direct';
+        const strat = plugin.getStrategy(url)
+        strategy = strat === 'yt-dlp' ? 'yt-dlp' : 'direct'
       } else {
-        const { isSocial } = isSocialMediaURL(url);
-        if (isSocial) strategy = 'yt-dlp';
+        const { isSocial } = isSocialMediaURL(url)
+        if (isSocial) strategy = 'yt-dlp'
       }
 
       tracker = {
@@ -2443,8 +2624,8 @@ app.whenReady().then(() => {
         filename: filename,
         paused: true,
         strategy: strategy
-      };
-      activeDownloads.set(url, tracker);
+      }
+      activeDownloads.set(url, tracker)
     }
 
     // Cas 1 : téléchargement "classique" géré par Electron
@@ -2463,7 +2644,12 @@ app.whenReady().then(() => {
     }
 
     // Cas 2 : téléchargement yt-dlp : on relance yt-dlp avec --continue
-    if (tracker && !tracker.process && tracker.savePath && (tracker.strategy === 'yt-dlp' || tracker.isYouTube || isSocialMediaURL(url).isSocial)) {
+    if (
+      tracker &&
+      !tracker.process &&
+      tracker.savePath &&
+      (tracker.strategy === 'yt-dlp' || tracker.isYouTube || isSocialMediaURL(url).isSocial)
+    ) {
       tracker.paused = false
       activeDownloadCount++ // Increment back while it's active
 
@@ -2485,19 +2671,25 @@ app.whenReady().then(() => {
       })
 
       win?.webContents.send('download-resumed', { url })
-
-        ; (async () => {
-          try {
-            const { platform } = isSocialMediaURL(url);
-            await downloadWithYtDlp(url, tracker.savePath as string, platform || (tracker.isYouTube ? 'YouTube' : ''), win!, undefined, tracker.filename)
-          } catch (error: any) {
-            win?.webContents.send('download-error', {
-              url,
-              error: error.message || 'Failed to resume download'
-            })
-          }
-        })()
-      return;
+      ;(async () => {
+        try {
+          const { platform } = isSocialMediaURL(url)
+          await downloadWithYtDlp(
+            url,
+            tracker.savePath as string,
+            platform || (tracker.isYouTube ? 'YouTube' : ''),
+            win!,
+            undefined,
+            tracker.filename
+          )
+        } catch (error: any) {
+          win?.webContents.send('download-error', {
+            url,
+            error: error.message || 'Failed to resume download'
+          })
+        }
+      })()
+      return
     }
 
     // Cas 3 : téléchargement multi-threaded : reprendre à partir des segments déjà téléchargés
@@ -2524,19 +2716,19 @@ app.whenReady().then(() => {
 
       win?.webContents.send('download-resumed', { url })
 
-        // Relancer le téléchargement multi-threaded
-        ; (async () => {
-          try {
-            if (win) {
-              await downloadWithMultiThreading(url, tracker.savePath!, win)
-            }
-          } catch (error: any) {
-            win?.webContents.send('download-error', {
-              url,
-              error: error.message || 'Failed to resume download'
-            })
+      // Relancer le téléchargement multi-threaded
+      ;(async () => {
+        try {
+          if (win) {
+            await downloadWithMultiThreading(url, tracker.savePath!, win)
           }
-        })()
+        } catch (error: any) {
+          win?.webContents.send('download-error', {
+            url,
+            error: error.message || 'Failed to resume download'
+          })
+        }
+      })()
     }
   })
 
@@ -2649,14 +2841,21 @@ app.whenReady().then(() => {
   })
 
   // Handler pour ignorer un téléchargement détecté
-  ipcMain.on('dismiss-detected-download', (_event, _url: string) => {
-    // Téléchargement ignoré
+  ipcMain.on('dismiss-detected-download', () => {
+    // Téléchargement ignoré - callback is intentionally empty
   })
 
   // Démarrer le serveur HTTP pour communiquer avec l'extension de navigateur
   startExtensionServer()
 
   createWindow()
+  console.log('[DEBUG] createWindow() executed')
+
+  // Defer yt-dlp update to after window creation to ensure app starts quickly
+  setTimeout(() => {
+    console.log('[DEBUG] Starting deferred autoUpdateYtDlp()')
+    autoUpdateYtDlp()
+  }, 5000)
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the

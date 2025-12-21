@@ -128,7 +128,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         };
 
         // Try to fetch cookies for the URL
-        if (chrome.cookies && request.url && (request.url.startsWith('http') || request.url.startsWith('https'))) {
+        if (typeof chrome !== 'undefined' && chrome.cookies && request.url && (request.url.startsWith('http') || request.url.startsWith('https'))) {
             try {
                 const urlObj = new URL(request.url);
                 chrome.cookies.getAll({ domain: urlObj.hostname }, (cookies) => {
@@ -153,6 +153,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 processDownload();
             }
         } else {
+            console.log('⚠️ Cookies API not available or URL not supported');
             processDownload();
         }
         return true;
@@ -192,42 +193,69 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // 4. DOWNLOAD INTERCEPTION - Like IDM (Automatic)
 // Intercept ALL downloads and redirect to DoulBrowser
-chrome.downloads.onCreated.addListener((downloadItem) => {
-    console.log('📥 Download intercepted:', downloadItem.url);
+if (typeof chrome !== 'undefined' && chrome.downloads && chrome.downloads.onCreated) {
+    chrome.downloads.onCreated.addListener((downloadItem) => {
+        console.log('📥 Download intercepted:', downloadItem.url);
 
-    // Cancel the browser's native download
-    chrome.downloads.cancel(downloadItem.id, () => {
-        // Remove from download shelf
-        chrome.downloads.erase({ id: downloadItem.id }, () => {
-            console.log('🗑️ Browser download cancelled and erased');
+        // Cancel the browser's native download
+        chrome.downloads.cancel(downloadItem.id, () => {
+            // Remove from download shelf
+            chrome.downloads.erase({ id: downloadItem.id }, () => {
+                console.log('🗑️ Browser download cancelled and erased');
+            });
         });
-    });
 
-    // Get the filename from the download item or URL
-    const filename = downloadItem.filename ||
-        downloadItem.url.split('/').pop().split('?')[0] ||
-        `download_${Date.now()}`;
+        // Get the filename from the download item or URL
+        const filename = downloadItem.filename ||
+            downloadItem.url.split('/').pop().split('?')[0] ||
+            `download_${Date.now()}`;
 
-    // Try to get current tab info for headers
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const activeTab = tabs[0];
-        const headers = {
-            'User-Agent': navigator.userAgent,
-            'Referer': activeTab ? activeTab.url : downloadItem.referrer || downloadItem.url
-        };
+        // Try to get current tab info for headers
+        if (chrome.tabs && chrome.tabs.query) {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                const activeTab = tabs[0];
+                const headers = {
+                    'User-Agent': navigator.userAgent,
+                    'Referer': activeTab ? activeTab.url : downloadItem.referrer || downloadItem.url
+                };
 
-        // Try to get cookies for the domain
-        if (downloadItem.url && downloadItem.url.startsWith('http')) {
-            try {
-                const urlObj = new URL(downloadItem.url);
-                chrome.cookies.getAll({ domain: urlObj.hostname }, (cookies) => {
-                    if (cookies && cookies.length > 0) {
-                        const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-                        headers['Cookie'] = cookieString;
-                        console.log(`🍪 Cookies attached for ${urlObj.hostname}`);
+                // Try to get cookies for the domain
+                if (chrome.cookies && downloadItem.url && downloadItem.url.startsWith('http')) {
+                    try {
+                        const urlObj = new URL(downloadItem.url);
+                        chrome.cookies.getAll({ domain: urlObj.hostname }, (cookies) => {
+                            if (cookies && cookies.length > 0) {
+                                const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+                                headers['Cookie'] = cookieString;
+                                console.log(`🍪 Cookies attached for ${urlObj.hostname}`);
+                            }
+
+                            // Send to DoulBrowser
+                            sendToDoulBrowser({
+                                type: 'download-detected',
+                                url: downloadItem.url,
+                                filename: filename,
+                                mimeType: downloadItem.mime || 'application/octet-stream',
+                                headers: headers,
+                                fileSize: downloadItem.fileSize || 0,
+                                timestamp: Date.now()
+                            });
+                        });
+                    } catch (e) {
+                        console.error('Error processing download:', e);
+                        // Send anyway without cookies
+                        sendToDoulBrowser({
+                            type: 'download-detected',
+                            url: downloadItem.url,
+                            filename: filename,
+                            mimeType: downloadItem.mime || 'application/octet-stream',
+                            headers: headers,
+                            fileSize: downloadItem.fileSize || 0,
+                            timestamp: Date.now()
+                        });
                     }
-
-                    // Send to DoulBrowser
+                } else {
+                    // Send without cookies
                     sendToDoulBrowser({
                         type: 'download-detected',
                         url: downloadItem.url,
@@ -237,34 +265,13 @@ chrome.downloads.onCreated.addListener((downloadItem) => {
                         fileSize: downloadItem.fileSize || 0,
                         timestamp: Date.now()
                     });
-                });
-            } catch (e) {
-                console.error('Error processing download:', e);
-                // Send anyway without cookies
-                sendToDoulBrowser({
-                    type: 'download-detected',
-                    url: downloadItem.url,
-                    filename: filename,
-                    mimeType: downloadItem.mime || 'application/octet-stream',
-                    headers: headers,
-                    fileSize: downloadItem.fileSize || 0,
-                    timestamp: Date.now()
-                });
-            }
-        } else {
-            // Send without cookies
-            sendToDoulBrowser({
-                type: 'download-detected',
-                url: downloadItem.url,
-                filename: filename,
-                mimeType: downloadItem.mime || 'application/octet-stream',
-                headers: headers,
-                fileSize: downloadItem.fileSize || 0,
-                timestamp: Date.now()
+                }
             });
         }
     });
-});
+} else {
+    console.log('⚠️ chrome.downloads API not available (Normal in Electron extension environment)');
+}
 
 console.log('🚀 DoulBrowser Background Worker - IDM Method Active');
 
