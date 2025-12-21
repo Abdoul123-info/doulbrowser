@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "DoulBrowser Download Manager",
+  "version": "1.0.0",
+  "description": "Extension pour capturer les téléchargements et les envoyer à DoulBrowser. Téléchargez des vidéos YouTube et des fichiers avec DoulBrowser.",
+  "author": "DoulBrowser Team",
+  "homepage_url": "https://github.com/yourusername/doulbrowser",
+  "permissions": [
+    "webRequest",
+    "downloads",
+    "storage",
+    "tabs",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["*://www.youtube.com/*", "*://youtube.com/*", "*://youtu.be/*"],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
+

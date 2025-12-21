@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  --card: 222.2 84% 4.9%;
+  --card-foreground: 210 40% 98%;
+  --popover: 222.2 84% 4.9%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 210 40% 98%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 212.7 26.8% 83.9%;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* Styles pour les champs de saisie - assurer la visibilité du texte */
+input[type="text"],
+input[type="url"],
+input[type="number"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+textarea,
+select {
+  color: hsl(var(--foreground)) !important;
+  background-color: hsl(var(--input) / 0.8) !important;
+  caret-color: hsl(var(--foreground)) !important;
+}
+
+/* Styles pour les inputs en lecture seule */
+input[readonly] {
+  background-color: hsl(var(--input) / 0.6) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+input[type="text"]::placeholder,
+input[type="url"]::placeholder,
+input[type="number"]::placeholder,
+input[type="email"]::placeholder,
+input[type="password"]::placeholder,
+input[type="search"]::placeholder,
+textarea::placeholder {
+  color: hsl(var(--muted-foreground)) !important;
+  opacity: 0.8 !important;
+}
+
+/* Styles pour le texte sélectionné dans les inputs */
+input[type="text"]::selection,
+input[type="url"]::selection,
+input[type="number"]::selection,
+input[type="email"]::selection,
+input[type="password"]::selection,
+input[type="search"]::selection,
+textarea::selection,
+select::selection {
+  background-color: hsl(217.2 32.6% 45%) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+/* Styles pour le texte sélectionné dans toute l'application */
+::selection {
+  background-color: hsl(217.2 32.6% 45%) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+/* Styles pour les inputs en focus */
+input[type="text"]:focus,
+input[type="url"]:focus,
+input[type="number"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="search"]:focus,
+textarea:focus,
+select:focus {
+  color: hsl(var(--foreground)) !important;
+  background-color: hsl(var(--input) / 0.9) !important;
+  outline: none !important;
+}
+
+/* Assurer que le texte dans les inputs est toujours visible */
+input,
+textarea,
+select {
+  -webkit-text-fill-color: hsl(var(--foreground)) !important;
+}
+
+/* Pour les navigateurs WebKit (Chrome, Safari, Edge) */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: hsl(var(--foreground)) !important;
+  -webkit-box-shadow: 0 0 0 30px hsl(var(--input) / 0.8) inset !important;
+  box-shadow: 0 0 0 30px hsl(var(--input) / 0.8) inset !important;
+}

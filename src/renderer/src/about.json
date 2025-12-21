@@ -1,0 +1,77 @@
+{
+    "application": {
+        "name": "DoulBrowser",
+        "version": "1.0.0",
+        "description": "Gestionnaire de téléchargements avancé avec accélération multi-threading",
+        "appId": "com.doulbrowser.app",
+        "website": "https://doulbrowser.com",
+        "support": "oumarouabdoul811@gmail.com"
+    },
+    "developer": {
+        "name": "Oumarou Abdoul Jabbar",
+        "role": "Concepteur et Développeur",
+        "email": "oumarouabdoul811@gmail.com",
+        "country": "Niger",
+        "city": "Niamey",
+        "website": "https://doulbrowser.com",
+        "phone": "+227 XX XX XX XX",
+        "linkedin": "https://linkedin.com/in/oumarou-abdoul-jabbar",
+        "github": "https://github.com/oumarou-abdoul-jabbar"
+    },
+    "company": {
+        "name": "DoulBrowser",
+        "country": "Niger",
+        "founded": "2024",
+        "registrationNumber": "XXXXX"
+    },
+    "legal": {
+        "copyright": "Copyright © 2024-2025 Oumarou Abdoul Jabbar",
+        "license": "MIT",
+        "privacyPolicy": "https://doulbrowser.com/privacy",
+        "termsOfService": "https://doulbrowser.com/terms"
+    },
+    "technologies": {
+        "framework": "Electron + React + Vite",
+        "downloadEngine": "yt-dlp + Multi-threading",
+        "platforms": [
+            "Windows",
+            "macOS",
+            "Linux"
+        ]
+    },
+    "features": [
+        "Téléchargements accélérés avec multi-threading",
+        "Support des plateformes de streaming (YouTube, TikTok, Facebook, Instagram)",
+        "Interception automatique des téléchargements (comme IDM)",
+        "Gestionnaire de files d'attente intelligent",
+        "Reprise des téléchargements interrompus",
+        "Extension Chrome intégrée"
+    ],
+    "credits": {
+        "thirdParty": [
+            {
+                "name": "yt-dlp",
+                "description": "Extracteur vidéo universel",
+                "license": "Unlicense",
+                "url": "https://github.com/yt-dlp/yt-dlp"
+            },
+            {
+                "name": "Electron",
+                "description": "Framework pour applications desktop",
+                "license": "MIT",
+                "url": "https://electronjs.org"
+            }
+        ]
+    },
+    "contact": {
+        "email": "oumarouabdoul811@gmail.com",
+        "support": "oumarouabdoul811@gmail.com",
+        "bugs": "https://github.com/doulbrowser/doulbrowser/issues",
+        "social": {
+            "twitter": "@doulbrowser",
+            "facebook": "doulbrowser",
+            "github": "doulbrowser",
+            "linkedin": "doulbrowser"
+        }
+    }
+}

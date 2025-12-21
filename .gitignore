@@ -1,0 +1,27 @@
+node_modules
+dist
+out
+.DS_Store
+.eslintcache
+*.log*
+
+# Large binaries (auto-downloaded at runtime)
+yt-dlp.exe
+yt-dlp
+ffmpeg.exe
+ffmpeg
+ffprobe.exe
+ffprobe
+
+# Downloaded videos (testing)
+*.mp4
+*.webm
+*.mkv
+*.avi
+
+# Resources that shouldn't be in repo
+resources/ffmpeg.exe
+
+# Debug files
+ytdlp-debug-output.txt
+*-player-script.js
