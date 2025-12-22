@@ -189,6 +189,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         return true;
     }
+
+    // ============================================
+    // GM_cookie HANDLERS
+    // ============================================
+
+    // GM_cookie.list
+    if (request.action === 'GM_cookie_list') {
+        chrome.cookies.getAll(request.details || {}, (cookies) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ cookies: cookies });
+            }
+        });
+        return true;
+    }
+
+    // GM_cookie.set
+    if (request.action === 'GM_cookie_set') {
+        chrome.cookies.set(request.details || {}, (cookie) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ cookie: cookie });
+            }
+        });
+        return true;
+    }
+
+    // GM_cookie.delete
+    if (request.action === 'GM_cookie_delete') {
+        chrome.cookies.remove(request.details || {}, (details) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ details: details });
+            }
+        });
+        return true;
+    }
 });
 
 // 4. DOWNLOAD INTERCEPTION - Like IDM (Automatic)

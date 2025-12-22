@@ -4,6 +4,51 @@
 (function () {
     console.log('🚀 DoulBrowser UI Manager - IDM Method ACTIVE');
 
+    // ============================================
+    // GM_ API POLYFILL FOR USERSCRIPT COMPATIBILITY
+    // Fixes ReferenceError: GM_cookie is not defined
+    // ============================================
+    const gm_polyfill = {
+        GM_cookie: {
+            list: (details, callback) => {
+                chrome.runtime.sendMessage({ action: 'GM_cookie_list', details }, (response) => {
+                    if (callback) callback(response.cookies, response.error);
+                });
+            },
+            set: (details, callback) => {
+                chrome.runtime.sendMessage({ action: 'GM_cookie_set', details }, (response) => {
+                    if (callback) callback(response.error);
+                });
+            },
+            delete: (details, callback) => {
+                chrome.runtime.sendMessage({ action: 'GM_cookie_delete', details }, (response) => {
+                    if (callback) callback(response.error);
+                });
+            }
+        },
+        GM_info: {
+            script: {
+                name: "DoulBrowser Assistant Shim",
+                version: "1.0.0"
+            }
+        },
+        GM_getValue: (name, defaultValue) => {
+            const val = localStorage.getItem(`GM_${name}`);
+            return val !== null ? JSON.parse(val) : defaultValue;
+        },
+        GM_setValue: (name, value) => {
+            localStorage.setItem(`GM_${name}`, JSON.stringify(value));
+        }
+    };
+
+    // Expose to window/global scope
+    Object.assign(window, gm_polyfill);
+    // Some scripts use globalThis or standard variable names
+    if (typeof GM_cookie === 'undefined') window.GM_cookie = gm_polyfill.GM_cookie;
+    if (typeof GM_info === 'undefined') window.GM_info = gm_polyfill.GM_info;
+    if (typeof GM_getValue === 'undefined') window.GM_getValue = gm_polyfill.GM_getValue;
+    if (typeof GM_setValue === 'undefined') window.GM_setValue = gm_polyfill.GM_setValue;
+
     // Map video elements to their CDN URLs
     const videoUrlMap = new WeakMap(); // video element -> CDN URL
 

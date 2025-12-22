@@ -69,7 +69,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
     return true; // Indique qu'on répondra de manière asynchrone
   }
-
+  
   if (request.action === 'sendDownload') {
     sendToDoulBrowser({
       type: 'download-detected',
@@ -80,7 +80,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     sendResponse({ success: true });
   }
-
+  
   if (request.action === 'pauseDownload') {
     fetch(`http://${DOULBROWSER_HOST}:${DOULBROWSER_PORT}/download-pause`, {
       method: 'POST',
@@ -95,7 +95,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
-
+  
   if (request.action === 'resumeDownload') {
     fetch(`http://${DOULBROWSER_HOST}:${DOULBROWSER_PORT}/download-resume`, {
       method: 'POST',
@@ -110,7 +110,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
-
+  
   if (request.action === 'cancelDownload') {
     fetch(`http://${DOULBROWSER_HOST}:${DOULBROWSER_PORT}/download-cancel`, {
       method: 'POST',
@@ -125,47 +125,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
-
-  // ============================================
-  // GM_cookie HANDLERS
-  // ============================================
-
-  // GM_cookie.list
-  if (request.action === 'GM_cookie_list') {
-    chrome.cookies.getAll(request.details || {}, (cookies) => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ error: chrome.runtime.lastError.message });
-      } else {
-        sendResponse({ cookies: cookies });
-      }
-    });
-    return true;
-  }
-
-  // GM_cookie.set
-  if (request.action === 'GM_cookie_set') {
-    chrome.cookies.set(request.details || {}, (cookie) => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ error: chrome.runtime.lastError.message });
-      } else {
-        sendResponse({ cookie: cookie });
-      }
-    });
-    return true;
-  }
-
-  // GM_cookie.delete
-  if (request.action === 'GM_cookie_delete') {
-    chrome.cookies.remove(request.details || {}, (details) => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ error: chrome.runtime.lastError.message });
-      } else {
-        sendResponse({ details: details });
-      }
-    });
-    return true;
-  }
-
-});
+  
 });
 
