@@ -3,49 +3,88 @@
   'use strict';
 
   // ============================================
-  // GM_ API POLYFILL FOR USERSCRIPT COMPATIBILITY
-  // Fixes ReferenceError: GM_cookie is not defined
+  // GM_ API BRIDGE FOR MAIN WORLD COMPATIBILITY
+  // Fixes ReferenceError: GM_cookie in YouTube scripts
   // ============================================
-  const gm_polyfill = {
-    GM_cookie: {
-      list: (details, callback) => {
-        chrome.runtime.sendMessage({ action: 'GM_cookie_list', details }, (response) => {
-          if (callback) callback(response.cookies, response.error);
-        });
-      },
-      set: (details, callback) => {
-        chrome.runtime.sendMessage({ action: 'GM_cookie_set', details }, (response) => {
-          if (callback) callback(response.error);
-        });
-      },
-      delete: (details, callback) => {
-        chrome.runtime.sendMessage({ action: 'GM_cookie_delete', details }, (response) => {
-          if (callback) callback(response.error);
-        });
-      }
-    },
-    GM_info: {
-      script: {
-        name: "DoulBrowser Assistant Shim",
-        version: "1.0.0"
-      }
-    },
-    GM_getValue: (name, defaultValue) => {
-      const val = localStorage.getItem(`GM_${name}`);
-      return val !== null ? JSON.parse(val) : defaultValue;
-    },
-    GM_setValue: (name, value) => {
-      localStorage.setItem(`GM_${name}`, JSON.stringify(value));
-    }
-  };
 
-  // Expose to window/global scope
-  Object.assign(window, gm_polyfill);
-  // Some scripts use globalThis or standard variable names
-  if (typeof GM_cookie === 'undefined') window.GM_cookie = gm_polyfill.GM_cookie;
-  if (typeof GM_info === 'undefined') window.GM_info = gm_polyfill.GM_info;
-  if (typeof GM_getValue === 'undefined') window.GM_getValue = gm_polyfill.GM_getValue;
-  if (typeof GM_setValue === 'undefined') window.GM_setValue = gm_polyfill.GM_setValue;
+  // 1. Script to be injected into the Main World (Page Context)
+  const mainWorldScript = `
+    (function() {
+      const BRIDGE_ID = 'DOULBROWSER_GM_BRIDGE';
+      
+      window.GM_cookie = {
+        list: (details, callback) => {
+          const id = Math.random().toString(36).slice(2);
+          window.postMessage({ type: BRIDGE_ID, action: 'GM_cookie_list', details, id }, '*');
+          window.addEventListener('message', function handler(e) {
+            if (e.data.type === BRIDGE_ID && e.data.responseId === id) {
+              window.removeEventListener('message', handler);
+              if (callback) callback(e.data.cookies, e.data.error);
+            }
+          });
+        },
+        set: (details, callback) => {
+          const id = Math.random().toString(36).slice(2);
+          window.postMessage({ type: BRIDGE_ID, action: 'GM_cookie_set', details, id }, '*');
+          window.addEventListener('message', function handler(e) {
+            if (e.data.type === BRIDGE_ID && e.data.responseId === id) {
+              window.removeEventListener('message', handler);
+              if (callback) callback(e.data.error);
+            }
+          });
+        },
+        delete: (details, callback) => {
+          const id = Math.random().toString(36).slice(2);
+          window.postMessage({ type: BRIDGE_ID, action: 'GM_cookie_delete', details, id }, '*');
+          window.addEventListener('message', function handler(e) {
+            if (e.data.type === BRIDGE_ID && e.data.responseId === id) {
+              window.removeEventListener('message', handler);
+              if (callback) callback(e.data.error);
+            }
+          });
+        }
+      };
+
+      window.GM_info = { script: { name: "DoulBrowser Assistant", version: "1.1.0" } };
+      
+      window.GM_getValue = (name, defaultValue) => {
+        try {
+          const val = localStorage.getItem('GM_' + name);
+          return val !== null ? JSON.parse(val) : defaultValue;
+        } catch(e) { return defaultValue; }
+      };
+      
+      window.GM_setValue = (name, value) => {
+        try { localStorage.setItem('GM_' + name, JSON.stringify(value)); } catch(e) {}
+      };
+      
+      console.log('✅ DoulBrowser GM_ Bridge Injected');
+    })();
+  `;
+
+  // 2. Inject the script into the Main World
+  const script = document.createElement('script');
+  script.textContent = mainWorldScript;
+  (document.head || document.documentElement).appendChild(script);
+  script.remove();
+
+  // 3. Listen for requests from the Main World and forward to Background
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || !event.data || event.data.type !== 'DOULBROWSER_GM_BRIDGE' || event.data.responseId) {
+      return;
+    }
+
+    const { action, details, id } = event.data;
+    chrome.runtime.sendMessage({ action, details }, (response) => {
+      window.postMessage({
+        type: 'DOULBROWSER_GM_BRIDGE',
+        responseId: id,
+        cookies: response?.cookies,
+        error: response?.error,
+        details: response?.details
+      }, '*');
+    });
+  });
 
   // Éviter les conflits avec d'autres extensions
   if (window.doulbrowserContentScriptLoaded) {
