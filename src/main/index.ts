@@ -728,7 +728,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
       const req = protocol.request(options, (res: any) => {
         if (res.statusCode >= 400) {
           fileStream.close()
-          fs.unlink(filePath, () => {})
+          fs.unlink(filePath, () => { })
           throw new Error(`HTTP ${res.statusCode} during single stream download`)
         }
 
@@ -769,7 +769,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
         })
 
         fileStream.on('error', (err: any) => {
-          fs.unlink(filePath, () => {})
+          fs.unlink(filePath, () => { })
           win.webContents.send('download-error', { url, error: err.message })
         })
       })
@@ -835,19 +835,21 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
                 // We'll rely on global tracking in IDM style later or approximate here.
                 // For now, let's just trigger progress update
                 tracker.lastBytes += chunk.length
-                // Note: strictly this is "bytes received since start", not total file size yet
-                // We'll fix progress calc slightly to be simple:
-                const progress = (tracker.lastBytes / fileInfo.size) * 100
-                tracker.lastProgress = Math.round(progress)
 
-                const speed = chunk.length / ((Date.now() - tracker.lastTime + 1) / 1000)
-                // Rough speed approximation
-                tracker.lastTime = Date.now()
+                // Calculate progress based on total size
+                const progress = (tracker.lastBytes / fileInfo.size) * 100
+                tracker.lastProgress = Math.min(Math.round(progress), 100) // Caps at 100%
+
+                // Speed calculation based on time elapsed since chunk received
+                const now = Date.now()
+                const elapsedSinceLast = (now - tracker.lastTime + 1) / 1000
+                const speed = chunk.length / elapsedSinceLast
+                tracker.lastTime = now
 
                 win.webContents.send('download-progress', {
                   filename: fileInfo.filename,
                   url: url,
-                  progress: Math.round(progress),
+                  progress: tracker.lastProgress,
                   receivedBytes: tracker.lastBytes,
                   totalBytes: fileInfo.size,
                   state: 'downloading',
@@ -970,18 +972,18 @@ async function fetchVideoInfo(
 
       const possibleNodeDirs = isWindows
         ? [
-            'C:\\Program Files\\nodejs',
+          'C:\\Program Files\\nodejs',
+          join(process.resourcesPath, 'node'),
+          dirname(process.execPath)
+        ]
+        : isMac
+          ? [
+            '/opt/homebrew/bin', // Apple Silicon
+            '/usr/local/bin', // Intel Mac
+            '/usr/bin',
             join(process.resourcesPath, 'node'),
             dirname(process.execPath)
           ]
-        : isMac
-          ? [
-              '/opt/homebrew/bin', // Apple Silicon
-              '/usr/local/bin', // Intel Mac
-              '/usr/bin',
-              join(process.resourcesPath, 'node'),
-              dirname(process.execPath)
-            ]
           : ['/usr/bin', '/usr/local/bin', dirname(process.execPath)]
 
       // Find Node.js and add to PATH
@@ -1083,29 +1085,29 @@ async function ensureFfmpegAvailable(_win?: BrowserWindow): Promise<string | nul
 
   const possibleFfmpegPaths = isWindows
     ? [
-        join(resourcesPath, 'app.asar.unpacked', 'ffmpeg.exe'),
-        join(resourcesPath, 'ffmpeg.exe'),
-        join(app.getPath('userData'), 'bin', 'ffmpeg.exe'),
-        'ffmpeg.exe'
-      ]
+      join(resourcesPath, 'app.asar.unpacked', 'ffmpeg.exe'),
+      join(resourcesPath, 'ffmpeg.exe'),
+      join(app.getPath('userData'), 'bin', 'ffmpeg.exe'),
+      'ffmpeg.exe'
+    ]
     : isMac
       ? [
-          // macOS Homebrew locations (Intel + Apple Silicon)
-          '/opt/homebrew/bin/ffmpeg', // Apple Silicon (M1/M2/M3)
-          '/usr/local/bin/ffmpeg', // Intel Macs
-          join(resourcesPath, 'app.asar.unpacked', 'ffmpeg'),
-          join(resourcesPath, 'ffmpeg'),
-          join(app.getPath('userData'), 'bin', 'ffmpeg'),
-          'ffmpeg'
-        ]
+        // macOS Homebrew locations (Intel + Apple Silicon)
+        '/opt/homebrew/bin/ffmpeg', // Apple Silicon (M1/M2/M3)
+        '/usr/local/bin/ffmpeg', // Intel Macs
+        join(resourcesPath, 'app.asar.unpacked', 'ffmpeg'),
+        join(resourcesPath, 'ffmpeg'),
+        join(app.getPath('userData'), 'bin', 'ffmpeg'),
+        'ffmpeg'
+      ]
       : [
-          // Linux
-          '/usr/bin/ffmpeg',
-          '/usr/local/bin/ffmpeg',
-          join(resourcesPath, 'app.asar.unpacked', 'ffmpeg'),
-          join(resourcesPath, 'ffmpeg'),
-          'ffmpeg'
-        ]
+        // Linux
+        '/usr/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        join(resourcesPath, 'app.asar.unpacked', 'ffmpeg'),
+        join(resourcesPath, 'ffmpeg'),
+        'ffmpeg'
+      ]
 
   for (const path of possibleFfmpegPaths) {
     if (existsSync(path)) {
@@ -1196,7 +1198,7 @@ async function ensureFfmpegAvailable(_win?: BrowserWindow): Promise<string | nul
                   await fsPromises.writeFile(ffmpegPath, ffmpegEntry.getData())
                   try {
                     await fsPromises.unlink(join(ffmpegDir, 'ffmpeg.zip'))
-                  } catch (_e) {}
+                  } catch (_e) { }
                   winForDownload?.webContents.send('download-complete', {
                     url: 'dependency-ffmpeg',
                     filename: 'FFmpeg Ready'
@@ -1313,6 +1315,12 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
       )
     } else {
       console.log('[DEBUG] Starting Direct Download (Multi-threading)...')
+      // RESET tracker stats to ensure fresh progress/speed calculation
+      tracker.lastBytes = 0
+      tracker.startTime = Date.now()
+      tracker.lastTime = Date.now()
+      tracker.lastProgress = 0
+
       await downloadWithMultiThreading(url, downloadPath, mainWindow)
     }
   } catch (error: any) {
@@ -1472,7 +1480,7 @@ async function stopDownload(url: string) {
       try {
         if (process.platform === 'win32' && tracker.process.pid) {
           const { exec } = require('child_process')
-          exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => {})
+          exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => { })
         } else {
           tracker.process.kill('SIGKILL')
         }
@@ -1648,8 +1656,9 @@ async function downloadWithYtDlp(
       // 3. They block HTTPS formats
       // Solution: Let yt-dlp use the default web client which supports cookies and HD
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        console.log('[yt-dlp] Using default web client for best HD quality with cookie support')
-        // No client restriction - yt-dlp will use the best available client
+        console.log('[yt-dlp] YouTube: Adding player client fallbacks (web,android,ios) for macOS 11 compatibility')
+        // v20: Use multiple clients to bypass PO-Token/Throttling on older systems
+        downloadArgs.push('--extractor-args', 'youtube:player_client=web,android,ios')
       }
 
       console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '))
@@ -1679,16 +1688,16 @@ async function downloadWithYtDlp(
 
       const possibleNodeDirs = isWindows
         ? [
-            'C:\\Program Files\\nodejs',
-            join(process.resourcesPath, 'node'),
-            dirname(process.execPath)
-          ]
+          'C:\\Program Files\\nodejs',
+          join(process.resourcesPath, 'node'),
+          dirname(process.execPath)
+        ]
         : isMac
           ? [
-              '/opt/homebrew/bin', // Apple Silicon
-              '/usr/local/bin', // Intel Mac
-              '/usr/bin'
-            ]
+            '/opt/homebrew/bin', // Apple Silicon
+            '/usr/local/bin', // Intel Mac
+            '/usr/bin'
+          ]
           : ['/usr/bin', '/usr/local/bin']
 
       // Find and add Node.js to PATH if found
@@ -1830,7 +1839,7 @@ async function downloadWithYtDlp(
                   try {
                     if (process.platform === 'win32' && ytDlpProcess.pid) {
                       const { exec } = require('child_process')
-                      exec(`taskkill /F /T /PID ${ytDlpProcess.pid}`, () => {})
+                      exec(`taskkill /F /T /PID ${ytDlpProcess.pid}`, () => { })
                     } else {
                       ytDlpProcess.kill('SIGKILL')
                     }
@@ -1898,11 +1907,31 @@ async function downloadWithYtDlp(
         } else {
           // CHECK IF PAUSED: Don't show error if the user manually paused it
           const tracker = activeDownloads.get(url)
-          if (tracker?.paused) {
-            console.log(`[yt-dlp] Process exited with code ${code} (Manual Pause) for ${url}`)
-            // UI already knows it's paused because we send download-paused in the IPC handler
+          if (tracker && (tracker.paused || tracker.cancelled)) {
+            console.log(`[yt-dlp] Process closed with code ${code} (paused/cancelled) for ${url}`)
             return
           }
+
+          console.error(`[yt-dlp] Process failed with code ${code} for ${url}`)
+
+          // Enhanced error message for user
+          let userFriendlyError = "Download failed."
+          if (errorOutput.includes("Sign in to confirm you are not a bot")) {
+            userFriendlyError = "YouTube requires authentication (Bot detection). Please check your browser login."
+          } else if (errorOutput.includes("Incomplete data received")) {
+            userFriendlyError = "Connection interrupted. Check your internet."
+          } else if (errorOutput.includes("PO-Token")) {
+            userFriendlyError = "YouTube blocked this request (PO-Token required). Try again or update the app."
+          }
+
+          // Log the last few lines of stderr for debugging
+          const lastErrorLines = errorOutput.split('\n').slice(-3).join('\n').trim()
+
+          win.webContents.send('download-error', {
+            url,
+            error: userFriendlyError,
+            details: lastErrorLines || `Process exited with code ${code}`
+          })
 
           // SMART RETRY: If YouTube Extraction failed with cookies, retry WITHOUT cookies
           const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
@@ -2109,8 +2138,8 @@ function startExtensionServer() {
             data.headers || {}, // Pass headers
             // Déterminer si audio only
             (data.mimeType && data.mimeType.startsWith('audio/')) ||
-              (filename && filename.toLowerCase().endsWith('.mp3')) ||
-              false
+            (filename && filename.toLowerCase().endsWith('.mp3')) ||
+            false
           )
 
           console.log('✅ Download added to queue successfully')
@@ -2566,7 +2595,7 @@ app.whenReady().then(() => {
             // Sur Windows, utiliser taskkill pour forcer l'arrêt
             if (process.platform === 'win32' && tracker.process.pid) {
               const { exec } = require('child_process')
-              exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => {})
+              exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => { })
             } else {
               tracker.process.kill('SIGKILL')
             }
@@ -2671,24 +2700,24 @@ app.whenReady().then(() => {
       })
 
       win?.webContents.send('download-resumed', { url })
-      ;(async () => {
-        try {
-          const { platform } = isSocialMediaURL(url)
-          await downloadWithYtDlp(
-            url,
-            tracker.savePath as string,
-            platform || (tracker.isYouTube ? 'YouTube' : ''),
-            win!,
-            undefined,
-            tracker.filename
-          )
-        } catch (error: any) {
-          win?.webContents.send('download-error', {
-            url,
-            error: error.message || 'Failed to resume download'
-          })
-        }
-      })()
+        ; (async () => {
+          try {
+            const { platform } = isSocialMediaURL(url)
+            await downloadWithYtDlp(
+              url,
+              tracker.savePath as string,
+              platform || (tracker.isYouTube ? 'YouTube' : ''),
+              win!,
+              undefined,
+              tracker.filename
+            )
+          } catch (error: any) {
+            win?.webContents.send('download-error', {
+              url,
+              error: error.message || 'Failed to resume download'
+            })
+          }
+        })()
       return
     }
 
@@ -2716,19 +2745,19 @@ app.whenReady().then(() => {
 
       win?.webContents.send('download-resumed', { url })
 
-      // Relancer le téléchargement multi-threaded
-      ;(async () => {
-        try {
-          if (win) {
-            await downloadWithMultiThreading(url, tracker.savePath!, win)
+        // Relancer le téléchargement multi-threaded
+        ; (async () => {
+          try {
+            if (win) {
+              await downloadWithMultiThreading(url, tracker.savePath!, win)
+            }
+          } catch (error: any) {
+            win?.webContents.send('download-error', {
+              url,
+              error: error.message || 'Failed to resume download'
+            })
           }
-        } catch (error: any) {
-          win?.webContents.send('download-error', {
-            url,
-            error: error.message || 'Failed to resume download'
-          })
-        }
-      })()
+        })()
     }
   })
 
