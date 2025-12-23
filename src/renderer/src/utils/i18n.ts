@@ -80,6 +80,7 @@ export interface Translations {
     deleteSelected: string;
     resumeAll: string;
     stopAll: string;
+    viewLogs: string;
   };
   // AddDownloadModal
   addDownload: {
@@ -196,6 +197,7 @@ const translations: Record<Language, Translations> = {
       deleteSelected: 'Supprimer',
       resumeAll: 'Tout Reprendre',
       stopAll: 'Tout Arrêter',
+      viewLogs: 'Voir les logs',
     },
     addDownload: {
       title: 'Ajouter un nouveau téléchargement',
@@ -306,6 +308,7 @@ const translations: Record<Language, Translations> = {
       deleteSelected: 'Delete',
       resumeAll: 'Resume All',
       stopAll: 'Stop All',
+      viewLogs: 'View Logs',
     },
     addDownload: {
       title: 'Add New Download',

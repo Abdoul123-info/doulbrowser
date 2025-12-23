@@ -35,6 +35,7 @@ export interface DownloadAPI {
     soundNotifications: boolean
     language: string
   }>) => Promise<any>
+  getDownloadLogs: (url: string) => Promise<string[]>
   removeDownloadListeners: () => void
 }
 

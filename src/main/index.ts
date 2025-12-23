@@ -56,6 +56,7 @@ interface DownloadTracker {
   audioOnly?: boolean // New flag
   filename?: string // Explicit filename if provided
   strategy?: 'yt-dlp' | 'direct' | 'electron'
+  logs?: string[] // Technical logs for debugging (v1.0.8)
 }
 
 const activeDownloads = new Map<string, DownloadTracker>()
@@ -1675,7 +1676,8 @@ async function downloadWithYtDlp(
         timeLeft: '--',
         createdAt: Date.now(),
         savePath: savePath,
-        canResume: true // ALWAYS allow resume for yt-dlp
+        canResume: true, // ALWAYS allow resume for yt-dlp
+        strategy: 'yt-dlp'
       })
 
       // v20: Cross-platform Node.js PATH injection for signature solving
@@ -1723,6 +1725,14 @@ async function downloadWithYtDlp(
         const chunk = data.toString()
         output += chunk
         stdoutBuffer += chunk
+
+        // Add to persistent logs (keep last 500 lines)
+        const trackerLog = activeDownloads.get(url)
+        if (trackerLog) {
+          if (!trackerLog.logs) trackerLog.logs = []
+          trackerLog.logs.push(chunk)
+          if (trackerLog.logs.length > 500) trackerLog.logs.shift()
+        }
 
         const lines = stdoutBuffer.split('\n')
         // Keep the last partial line in the buffer
@@ -1773,7 +1783,8 @@ async function downloadWithYtDlp(
               timeLeft: eta,
               originalUrl: url,
               canResume: true, // Always allow resume UI
-              filename: filename
+              filename: filename,
+              strategy: 'yt-dlp'
             })
           } else if (trimmedLine.includes('[download] 100% of')) {
             // Sync state for 100% case
@@ -1797,7 +1808,8 @@ async function downloadWithYtDlp(
               timeLeft: '00:00',
               originalUrl: url,
               canResume: true, // Always allow resume UI
-              filename: filename
+              filename: filename,
+              strategy: 'yt-dlp'
             })
 
             // SAFETY: Force-kill yt-dlp if it doesn't exit within 10 seconds after reaching 100%
@@ -1856,8 +1868,17 @@ async function downloadWithYtDlp(
       })
 
       ytDlpProcess.stderr.on('data', (data) => {
-        errorOutput += data.toString()
-        console.error(`[yt - dlp] stderr: ${data.toString()} `)
+        const stderrChunk = data.toString()
+        errorOutput += stderrChunk
+        console.error(`[yt-dlp] stderr: ${stderrChunk}`)
+
+        // Add to persistent logs
+        const trackerLog = activeDownloads.get(url)
+        if (trackerLog) {
+          if (!trackerLog.logs) trackerLog.logs = []
+          trackerLog.logs.push(`[ERROR] ${stderrChunk}`)
+          if (trackerLog.logs.length > 500) trackerLog.logs.shift()
+        }
       })
 
       ytDlpProcess.on('close', (code) => {
@@ -2890,6 +2911,12 @@ app.whenReady().then(() => {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+
+  // [v1.0.8] IPC Handler to get download logs
+  ipcMain.handle('get-download-logs', (_event, url: string) => {
+    const tracker = activeDownloads.get(url)
+    return tracker?.logs || []
   })
 })
 

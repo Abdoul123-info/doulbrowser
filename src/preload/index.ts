@@ -21,6 +21,7 @@ const api = {
   dismissDetectedDownload: (url: string) => ipcRenderer.send('dismiss-detected-download', url),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings: any) => ipcRenderer.invoke('save-settings', settings),
+  getDownloadLogs: (url: string) => ipcRenderer.invoke('get-download-logs', url),
   removeDownloadListeners: () => {
     ipcRenderer.removeAllListeners('download-progress');
     ipcRenderer.removeAllListeners('download-started');

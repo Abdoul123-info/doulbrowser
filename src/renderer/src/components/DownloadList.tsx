@@ -1,7 +1,8 @@
-import { Play, Pause, X, File, FolderOpen } from 'lucide-react';
+import { Play, Pause, X, File, FolderOpen, Terminal } from 'lucide-react';
 import clsx from 'clsx';
 import { useState, useEffect, useCallback } from 'react';
 import { AddDownloadModal } from './AddDownloadModal';
+import { LogModal } from './LogModal';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../utils/i18n';
 
@@ -17,6 +18,7 @@ export interface DownloadItem {
     savePath?: string;
     canResume?: boolean;
     createdAt: number;
+    strategy?: 'yt-dlp' | 'direct' | 'electron';
 }
 
 type DownloadListProps = {
@@ -73,6 +75,7 @@ export function DownloadList({ filter }: DownloadListProps) {
     const [downloads, setDownloads] = useState<DownloadItem[]>(() => loadDownloadsFromStorage());
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [logModalItem, setLogModalItem] = useState<{ url: string, name: string } | null>(null);
 
     // Save to localStorage whenever downloads change
     useEffect(() => {
@@ -258,7 +261,8 @@ export function DownloadList({ filter }: DownloadListProps) {
             status: 'queued',
             url,
             timeLeft: '--',
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            strategy: 'yt-dlp'
         };
 
         setDownloads(prev => [newDownload, ...prev]);
@@ -531,6 +535,15 @@ export function DownloadList({ filter }: DownloadListProps) {
                                                     <X className="w-4 h-4" />
                                                 </button>
                                             )}
+                                            {item.strategy === 'yt-dlp' && item.url && (
+                                                <button
+                                                    onClick={() => item.url && setLogModalItem({ url: item.url, name: item.name })}
+                                                    className="p-1.5 hover:bg-blue-500/10 rounded-md text-muted-foreground hover:text-blue-500 transition-colors"
+                                                    title={t.downloadList.viewLogs}
+                                                >
+                                                    <Terminal className="w-4 h-4" />
+                                                </button>
+                                            )}
                                         </div>
                                     </td>
                                 </tr>
@@ -549,6 +562,13 @@ export function DownloadList({ filter }: DownloadListProps) {
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 onAdd={handleAddDownload}
+            />
+
+            <LogModal
+                isOpen={!!logModalItem}
+                onClose={() => setLogModalItem(null)}
+                url={logModalItem?.url || ''}
+                filename={logModalItem?.name || ''}
             />
         </div>
     );
