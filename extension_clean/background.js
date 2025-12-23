@@ -229,6 +229,57 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true;
     }
+
+    // INTERACTIVE DOWNLOAD CONTROL (Coherence with DoulBrowser)
+    if (request.action === 'checkConnection') {
+        fetch(`http://${DOULBROWSER_HOST}:${DOULBROWSER_PORT}/ping`)
+            .then(() => {
+                sendResponse({ connected: true });
+            })
+            .catch(() => {
+                sendResponse({ connected: false });
+            });
+        return true;
+    }
+
+    if (request.action === 'pauseDownload') {
+        fetch(`http://${DOULBROWSER_HOST}:${DOULBROWSER_PORT}/download-pause`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: request.url })
+        }).then(() => {
+            sendResponse({ success: true });
+        }).catch(() => {
+            sendResponse({ success: false });
+        });
+        return true;
+    }
+
+    if (request.action === 'resumeDownload') {
+        fetch(`http://${DOULBROWSER_HOST}:${DOULBROWSER_PORT}/download-resume`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: request.url })
+        }).then(() => {
+            sendResponse({ success: true });
+        }).catch(() => {
+            sendResponse({ success: false });
+        });
+        return true;
+    }
+
+    if (request.action === 'cancelDownload') {
+        fetch(`http://${DOULBROWSER_HOST}:${DOULBROWSER_PORT}/download-cancel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: request.url })
+        }).then(() => {
+            sendResponse({ success: true });
+        }).catch(() => {
+            sendResponse({ success: false });
+        });
+        return true;
+    }
 });
 
 // 4. DOWNLOAD INTERCEPTION - Like IDM (Automatic)

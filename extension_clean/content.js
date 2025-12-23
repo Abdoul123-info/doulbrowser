@@ -9,81 +9,36 @@
     // Fixes ReferenceError: GM_cookie in YouTube scripts
     // ============================================
 
-    // 1. Script to be injected into the Main World (Page Context)
-    const mainWorldScript = `
-        (function() {
-            const BRIDGE_ID = 'DOULBROWSER_GM_BRIDGE';
-            
-            window.GM_cookie = {
-                list: (details, callback) => {
-                    const id = Math.random().toString(36).slice(2);
-                    window.postMessage({ type: BRIDGE_ID, action: 'GM_cookie_list', details, id }, '*');
-                    window.addEventListener('message', function handler(e) {
-                        if (e.data.type === BRIDGE_ID && e.data.responseId === id) {
-                            window.removeEventListener('message', handler);
-                            if (callback) callback(e.data.cookies, e.data.error);
-                        }
-                    });
-                },
-                set: (details, callback) => {
-                    const id = Math.random().toString(36).slice(2);
-                    window.postMessage({ type: BRIDGE_ID, action: 'GM_cookie_set', details, id }, '*');
-                    window.addEventListener('message', function handler(e) {
-                        if (e.data.type === BRIDGE_ID && e.data.responseId === id) {
-                            window.removeEventListener('message', handler);
-                            if (callback) callback(e.data.error);
-                        }
-                    });
-                },
-                delete: (details, callback) => {
-                    const id = Math.random().toString(36).slice(2);
-                    window.postMessage({ type: BRIDGE_ID, action: 'GM_cookie_delete', details, id }, '*');
-                    window.addEventListener('message', function handler(e) {
-                        if (e.data.type === BRIDGE_ID && e.data.responseId === id) {
-                            window.removeEventListener('message', handler);
-                            if (callback) callback(e.data.error);
-                        }
-                    });
-                }
-            };
+    // 1. Inject the bridge script from the extension
+    try {
+        const script = document.createElement('script');
+        script.src = chrome.runtime.getURL('bridge.js');
+        (document.head || document.documentElement).appendChild(script);
+        script.onload = () => script.remove();
+        console.log('🚀 DoulBrowser GM_ Bridge Loader ACTIVE');
+    } catch (e) {
+        console.error('❌ Failed to inject GM_ bridge:', e);
+    }
 
-            window.GM_info = { script: { name: "DoulBrowser Assistant", version: "1.1.0" } };
-            
-            window.GM_getValue = (name, defaultValue) => {
-                try {
-                    const val = localStorage.getItem('GM_' + name);
-                    return val !== null ? JSON.parse(val) : defaultValue;
-                } catch(e) { return defaultValue; }
-            };
-            
-            window.GM_setValue = (name, value) => {
-                try { localStorage.setItem('GM_' + name, JSON.stringify(value)); } catch(e) {}
-            };
-            
-            console.log('✅ DoulBrowser GM_ Bridge Injected');
-        })();
-    `;
-
-    // 2. Inject the script into the Main World
-    const script = document.createElement('script');
-    script.textContent = mainWorldScript;
-    (document.head || document.documentElement).appendChild(script);
-    script.remove();
-
-    // 3. Listen for requests from the Main World and forward to Background
+    // 2. Listen for requests from the Main World and forward to Background
     window.addEventListener('message', (event) => {
+        // Only accept messages from the same window
         if (event.source !== window || !event.data || event.data.type !== 'DOULBROWSER_GM_BRIDGE' || event.data.responseId) {
             return;
         }
 
         const { action, details, id } = event.data;
+
+        // Forward to background script
         chrome.runtime.sendMessage({ action, details }, (response) => {
+            // Send back to the Main World
             window.postMessage({
                 type: 'DOULBROWSER_GM_BRIDGE',
                 responseId: id,
                 cookies: response?.cookies,
                 error: response?.error,
-                details: response?.details
+                details: response?.details,
+                cookie: response?.cookie // for GM_cookie_set
             }, '*');
         });
     });
@@ -107,6 +62,19 @@
                 });
                 console.log('📹 Mapped video to CDN:', request.url.substring(0, 60));
             });
+        }
+
+        if (request.action === 'detectVideo') {
+            const url = location.href;
+            chrome.runtime.sendMessage({
+                action: 'sendDownload',
+                url: url,
+                filename: document.title || 'video',
+                type: 'video/mp4'
+            }, (response) => {
+                sendResponse({ success: !!(response && response.success) });
+            });
+            return true;
         }
     });
 
@@ -381,12 +349,51 @@
                     }
 
                     if (response && response.success) {
-                        btn.textContent = '✅ Started';
-                        btn.style.background = '#34C759 !important';
-                        setTimeout(() => {
-                            btn.textContent = '⬇️ DoulDownload';
-                            btn.style.background = '#007AFF !important';
-                        }, 2000);
+                        btn.textContent = '⏳ Preparing...';
+                        btn.style.background = '#007AFF !important';
+                        btn.style.pointerEvents = 'none';
+
+                        // Poll for progress updates
+                        const pollUrl = downloadUrl;
+                        let pollAttempts = 0;
+                        const pollInterval = setInterval(async () => {
+                            pollAttempts++;
+                            try {
+                                const statusRes = await fetch(`http://localhost:8765/download-status?url=${encodeURIComponent(pollUrl)}`);
+                                if (statusRes.ok) {
+                                    const data = await statusRes.json();
+
+                                    if (data.status === 'completed') {
+                                        clearInterval(pollInterval);
+                                        btn.textContent = '✅ Finished!';
+                                        btn.style.background = '#34C759 !important';
+                                        btn.style.pointerEvents = 'all';
+                                        setTimeout(() => {
+                                            btn.textContent = '⬇️ DoulDownload';
+                                            btn.style.background = '#007AFF !important';
+                                        }, 3000);
+                                    } else if (data.status === 'downloading') {
+                                        btn.textContent = `⏳ ${Math.round(data.progress)}%`;
+                                    } else if (data.status === 'error' || data.status === 'cancelled') {
+                                        clearInterval(pollInterval);
+                                        btn.textContent = data.status === 'cancelled' ? '⚠️ Cancelled' : '❌ Error';
+                                        btn.style.background = (data.status === 'cancelled' ? '#FF9500' : '#FF3B30') + ' !important';
+                                        btn.style.pointerEvents = 'all';
+                                        setTimeout(() => {
+                                            btn.textContent = '⬇️ DoulDownload';
+                                            btn.style.background = '#007AFF !important';
+                                        }, 3000);
+                                    }
+                                }
+                            } catch (e) {
+                                // If app is closed or connection lost
+                                if (pollAttempts > 10) {
+                                    clearInterval(pollInterval);
+                                    btn.textContent = '⬇️ DoulDownload';
+                                    btn.style.pointerEvents = 'all';
+                                }
+                            }
+                        }, 1000);
                     } else {
                         btn.textContent = '❌ Error';
                         btn.style.background = '#FF3B30 !important';
