@@ -9,16 +9,8 @@
     // Fixes ReferenceError: GM_cookie in YouTube scripts
     // ============================================
 
-    // 1. Inject the bridge script from the extension
-    try {
-        const script = document.createElement('script');
-        script.src = chrome.runtime.getURL('bridge.js');
-        (document.head || document.documentElement).appendChild(script);
-        script.onload = () => script.remove();
-        console.log('🚀 DoulBrowser GM_ Bridge Loader ACTIVE');
-    } catch (e) {
-        console.error('❌ Failed to inject GM_ bridge:', e);
-    }
+    // 1. Bridge script is now injected via manifest.json (Main World)
+    console.log('🚀 DoulBrowser GM_ Bridge ACTIVE (via Manifest)');
 
     // 2. Listen for requests from the Main World and forward to Background
     window.addEventListener('message', (event) => {
