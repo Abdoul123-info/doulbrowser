@@ -1401,18 +1401,14 @@ async function downloadWithYtDlp(
         const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
 
         if (isYouTube) {
-          // YouTube: Prioritize 1080p+ with best audio, fallback to best available
-          // Fix for "PO-Token required" / 403 Forbidden:
-          // 1. Use multiple player clients
-          // 2. Disable cache
+          // YouTube: More flexible format selector to avoid "format not available" errors
+          // Simplified chain with multiple fallbacks
           downloadArgs.push(
             '-f',
-            'bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
-            '--extractor-args',
-            'youtube:player_client=web,mweb',
+            'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
             '--no-cache-dir'
           )
-          console.log('[yt-dlp] YouTube: Using high-quality format with PO-Token mitigation')
+          console.log('[yt-dlp] YouTube: Using flexible format selector for maximum compatibility')
         } else {
           // Other platforms: Use best available video+audio
           downloadArgs.push('-f', 'bestvideo+bestaudio/best')
@@ -1476,16 +1472,13 @@ async function downloadWithYtDlp(
         }
       }
 
-      // v19: YouTube client handling for HD quality
-      // REMOVED: Restrictive client chain (android,ios,tv_embedded) because:
-      // 1. These clients don't support cookies
-      // 2. They require PO tokens for HD access
-      // 3. They block HTTPS formats
-      // Solution: Let yt-dlp use the default web client which supports cookies and HD
+      // v21: YouTube client handling - OPTIMIZED for 2025
+      // Use ONLY web and mobile web clients to avoid PO-Token GVS requirements
+      // android/ios clients require GVS PO-Tokens which are not available
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        console.log('[yt-dlp] YouTube: Adding player client fallbacks (web,android,ios) for macOS 11 compatibility')
-        // v20: Use multiple clients to bypass PO-Token/Throttling on older systems
-        downloadArgs.push('--extractor-args', 'youtube:player_client=web,android,ios')
+        console.log('[yt-dlp] YouTube: Using web,mweb clients (PO-Token optimized)')
+        // Only use clients that work without GVS PO-Token
+        downloadArgs.push('--extractor-args', 'youtube:player_client=web,mweb')
       }
 
       console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '))
@@ -1884,7 +1877,7 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.1.3',
+          version: '1.1.4',
           endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )
