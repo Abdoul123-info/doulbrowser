@@ -1577,16 +1577,17 @@ async function downloadWithYtDlp(
 
         if (isYouTube) {
           // YouTube: Prioritize 1080p+ with best audio, fallback to best available
-          // Format explanation:
-          // 1. bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a] - Try 1080p+ MP4 with M4A audio
-          // 2. bestvideo[ext=mp4]+bestaudio[ext=m4a] - Any MP4 video with M4A audio
-          // 3. bestvideo+bestaudio - Best video/audio in any format (will be merged)
-          // 4. best - Single file with best quality (no merge needed)
+          // Fix for "PO-Token required" / 403 Forbidden:
+          // 1. Use multiple player clients
+          // 2. Disable cache
           downloadArgs.push(
             '-f',
-            'bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+            'bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+            '--extractor-args',
+            'youtube:player_client=web,mweb',
+            '--no-cache-dir'
           )
-          console.log('[yt-dlp] YouTube: Using high-quality format (1080p+ preferred)')
+          console.log('[yt-dlp] YouTube: Using high-quality format with PO-Token mitigation')
         } else {
           // Other platforms: Use best available video+audio
           downloadArgs.push('-f', 'bestvideo+bestaudio/best')
@@ -2058,8 +2059,8 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.0.0',
-          endpoints: ['/ping', '/download-detected']
+          version: '1.1.1',
+          endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )
       return
@@ -2190,88 +2191,71 @@ function startExtensionServer() {
 
     // Endpoint pour obtenir le statut d'un téléchargement
     if (url.pathname === '/download-status' && req.method === 'GET') {
-      const downloadUrl = url.searchParams.get('url')
-
       if (downloadUrl) {
-        const tracker = activeDownloads.get(downloadUrl)
+        // 1. Check in Active Downloads
+        let tracker = activeDownloads.get(downloadUrl)
 
         if (tracker) {
           const progress = tracker.lastProgress || 0
           const receivedBytes = tracker.lastBytes || 0
-          // Pour yt-dlp, utiliser totalBytes stocké dans le tracker
           const totalBytes = tracker.item?.getTotalBytes() || (tracker as any).totalBytes || 0
 
-          // Calculer la vitesse
-          // Priorité 1: Vitesse stockée directement depuis yt-dlp (plus précise)
-          // Priorité 2: Calcul basé sur lastTime et lastBytes (pour téléchargements multi-threaded)
-          // Priorité 3: Vitesse moyenne depuis le début
           const now = Date.now()
           let speed = 0
-
-          // Vérifier si la vitesse est déjà stockée (pour yt-dlp)
           if ((tracker as any).lastSpeed && (tracker as any).lastSpeed > 0) {
             speed = (tracker as any).lastSpeed
           } else if (tracker.lastTime && tracker.lastTime > 0 && receivedBytes > 0) {
-            // Calculer la vitesse basée sur la dernière mise à jour
-            const elapsed = (now - tracker.startTime) / 1000 // en secondes
+            const elapsed = (now - tracker.startTime) / 1000
             speed = elapsed > 0 ? receivedBytes / elapsed : 0
           } else {
-            // Fallback : vitesse moyenne depuis le début
-            const elapsed = (now - tracker.startTime) / 1000 // en secondes
+            const elapsed = (now - tracker.startTime) / 1000
             speed = elapsed > 0 ? receivedBytes / elapsed : 0
           }
 
-          // Formater la vitesse
           let speedStr = '0 B/s'
           if (speed > 0) {
-            if (speed < 1024) {
-              speedStr = `${Math.round(speed)} B/s`
-            } else if (speed < 1024 * 1024) {
-              speedStr = `${(speed / 1024).toFixed(2)} KB/s`
-            } else {
-              speedStr = `${(speed / (1024 * 1024)).toFixed(2)} MB/s`
-            }
+            if (speed < 1024) speedStr = `${Math.round(speed)} B/s`
+            else if (speed < 1024 * 1024) speedStr = `${(speed / 1024).toFixed(2)} KB/s`
+            else speedStr = `${(speed / (1024 * 1024)).toFixed(2)} MB/s`
           }
 
-          // Calculer le temps restant
           let timeLeft = '--'
           if (speed > 0 && totalBytes > 0) {
             const remaining = totalBytes - receivedBytes
             const seconds = remaining / speed
-            if (seconds < 60) {
-              timeLeft = `${Math.round(seconds)}s`
-            } else if (seconds < 3600) {
-              timeLeft = `${Math.round(seconds / 60)}m`
-            } else {
-              timeLeft = `${Math.round(seconds / 3600)}h`
-            }
+            if (seconds < 60) timeLeft = `${Math.round(seconds)}s`
+            else if (seconds < 3600) timeLeft = `${Math.round(seconds / 60)}m`
+            else timeLeft = `${Math.round(seconds / 3600)}h`
           }
 
-          // Vérifier si le téléchargement est terminé
           let status = 'downloading'
-          if (tracker.cancelled) {
-            status = 'cancelled'
-          } else if (tracker.paused) {
-            status = 'paused'
-          } else if (progress >= 100 || (totalBytes > 0 && receivedBytes >= totalBytes)) {
-            status = 'completed'
-          }
+          if (tracker.cancelled) status = 'cancelled'
+          else if (tracker.paused) status = 'paused'
+          else if (progress >= 100 || (totalBytes > 0 && receivedBytes >= totalBytes)) status = 'completed'
 
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(
-            JSON.stringify({
-              status: status,
-              progress: progress,
-              receivedBytes: receivedBytes,
-              totalBytes: totalBytes,
-              speed: speed, // Vitesse en bytes/seconde (nombre)
-              speedFormatted: speedStr, // Vitesse formatée (chaîne)
-              timeLeft: timeLeft
-            })
-          )
-        } else {
-          res.writeHead(404, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'Download not found' }))
+          res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders })
+          res.end(JSON.stringify({
+            status, progress, receivedBytes, totalBytes, speed, speedFormatted: speedStr, timeLeft
+          }))
+        }
+        // 2. Check in Queue (Fix for 404 errors)
+        else {
+          const queuedItem = downloadQueue.find(item => item.url === downloadUrl)
+          if (queuedItem) {
+            res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders })
+            res.end(JSON.stringify({
+              status: 'waiting',
+              progress: 0,
+              receivedBytes: 0,
+              totalBytes: 0,
+              speed: 0,
+              speedFormatted: 'Waiting...',
+              timeLeft: '--'
+            }))
+          } else {
+            res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders })
+            res.end(JSON.stringify({ error: 'Download not found' }))
+          }
         }
       } else {
         res.writeHead(400, { 'Content-Type': 'application/json' })
