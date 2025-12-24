@@ -3,7 +3,7 @@ import type { DownloadItem } from 'electron'
 import { join, basename, dirname } from 'path'
 import { existsSync, promises as fsPromises, readFileSync, writeFileSync } from 'fs'
 import * as fs from 'fs'
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
 import { URL } from 'url'
 import { createServer } from 'http'
 import icon from '../../resources/icon.png?asset'
@@ -356,13 +356,12 @@ function ensureYtDlpAvailable(): string | null {
   }
 
   // Check in system PATH (fallback)
-  const { execSync } = require('child_process')
   try {
     const which = platform === 'win32' ? 'where' : 'which'
     const result = execSync(`${which} yt-dlp`, { encoding: 'utf8' }).trim()
     if (result) {
       console.log('[yt-dlp] Found in system PATH:', result)
-      return result.split('\\n')[0]
+      return result.split('\n')[0]
     }
   } catch (_e) {
     console.log('[yt-dlp] Not found in system PATH')
@@ -385,7 +384,6 @@ async function ensureFfmpegAvailable(win?: BrowserWindow): Promise<string | null
   }
 
   // 2. Check in system PATH (Homebrew on macOS, or manual install)
-  const { execSync } = require('child_process')
   try {
     const which = platform === 'win32' ? 'where' : 'which'
     const result = execSync(`${which} ffmpeg`, { encoding: 'utf8' }).trim()
