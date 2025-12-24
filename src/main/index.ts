@@ -1877,7 +1877,7 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.1.4',
+          version: '1.1.5',
           endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )
@@ -2009,6 +2009,7 @@ function startExtensionServer() {
 
     // Endpoint pour obtenir le statut d'un téléchargement
     if (url.pathname === '/download-status' && req.method === 'GET') {
+      const downloadUrl = url.searchParams.get('url')
       if (downloadUrl) {
         // 1. Check in Active Downloads
         let tracker = activeDownloads.get(downloadUrl)
