@@ -1051,6 +1051,61 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
   }
 }
 
+// Helper to get video info (formats) - V22 Signature Solver Support
+async function fetchVideoInfo(
+  url: string,
+  requestHeaders: Record<string, string> = {}
+): Promise<any> {
+  const runYtDlp = (useCookies: boolean) => {
+    return new Promise((resolve, reject) => {
+      const ytDlpPath = ensureYtDlpAvailable()
+      if (!ytDlpPath) return reject(new Error('yt-dlp not found'))
+
+      const args = ['--dump-json', '--no-warnings', '--no-check-certificates', url]
+
+      // v22: Signature solving support (inject Node path)
+      const env = { ...process.env }
+      const platform = process.platform
+      if (platform === 'darwin') {
+        env['PATH'] = `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${process.env.PATH}`
+      }
+
+      if (useCookies && requestHeaders['Cookie']) {
+        args.push('--add-header', `Cookie:${requestHeaders['Cookie']}`)
+        if (requestHeaders['User-Agent']) {
+          args.push('--user-agent', requestHeaders['User-Agent'])
+        }
+      }
+
+      const cp = spawn(ytDlpPath, args, { env })
+      let stdout = ''
+      let stderr = ''
+
+      cp.stdout.on('data', (data) => (stdout += data.toString()))
+      cp.stderr.on('data', (data) => (stderr += data.toString()))
+
+      cp.on('close', (code) => {
+        if (code === 0) {
+          try {
+            resolve(JSON.parse(stdout))
+          } catch (e) {
+            reject(new Error('Failed to parse yt-dlp output'))
+          }
+        } else {
+          reject(new Error(stderr || `yt-dlp exited with code ${code}`))
+        }
+      })
+    })
+  }
+
+  try {
+    return await runYtDlp(true)
+  } catch (error) {
+    console.log('[fetchVideoInfo] Failed with cookies, retrying without...')
+    return await runYtDlp(false)
+  }
+}
+
 async function startDownloadFromQueue(queuedItem: QueuedDownload) {
   const { url, savePath, mainWindow } = queuedItem
 
@@ -1472,13 +1527,12 @@ async function downloadWithYtDlp(
         }
       }
 
-      // v21: YouTube client handling - OPTIMIZED for 2025
-      // Use ONLY web and mobile web clients to avoid PO-Token GVS requirements
-      // android/ios clients require GVS PO-Tokens which are not available
+      // v22: YouTube client handling - 2025 COMPATIBILITY FIX
+      // 'mweb' and 'android/ios' now require GVS PO-Tokens.
+      // 'web' and 'tv_embedded' are currently the most reliable without tokens.
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        console.log('[yt-dlp] YouTube: Using web,mweb clients (PO-Token optimized)')
-        // Only use clients that work without GVS PO-Token
-        downloadArgs.push('--extractor-args', 'youtube:player_client=web,mweb')
+        console.log('[yt-dlp] YouTube: Using web,tv_embedded clients (Signature solving optimized)')
+        downloadArgs.push('--extractor-args', 'youtube:player_client=web,tv_embedded')
       }
 
       console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '))
@@ -1511,22 +1565,36 @@ async function downloadWithYtDlp(
         ? [
           'C:\\Program Files\\nodejs',
           join(process.resourcesPath, 'node'),
-          dirname(process.execPath)
+          dirname(process.execPath),
+          join(app.getAppPath(), 'node_modules', '.bin')
         ]
         : isMac
           ? [
+            '/usr/local/bin', // Intel/General
             '/opt/homebrew/bin', // Apple Silicon
-            '/usr/local/bin', // Intel Mac
-            '/usr/bin'
+            '/usr/bin',
+            '/bin',
+            '/usr/sbin',
+            '/sbin',
+            dirname(process.execPath),
+            '/Applications/DoulBrowser.app/Contents/MacOS'
           ]
-          : ['/usr/bin', '/usr/local/bin']
+          : ['/usr/bin', '/usr/local/bin', '/bin']
 
       // Find and add Node.js to PATH if found
+      let nodeFoundDir = ''
       for (const dir of possibleNodeDirs) {
         if (existsSync(join(dir, nodeBinary))) {
-          env[pathKey] = `${dir}${process.platform === 'win32' ? ';' : ':'}${env[pathKey]}`
+          nodeFoundDir = dir
           break
         }
+      }
+
+      if (nodeFoundDir) {
+        console.log(`[yt-dlp] Found Node.js for signature solving at: ${nodeFoundDir}`)
+        env[pathKey] = `${nodeFoundDir}${process.platform === 'win32' ? ';' : ':'}${env[pathKey]}`
+      } else {
+        console.warn('[yt-dlp] WARNING: Node.js not found in common paths. YouTube "n" challenge may fail.')
       }
 
       env['YTDLP_JS_ENGINE'] = 'node'
@@ -1877,7 +1945,7 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.1.5',
+          version: '1.1.6',
           endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )

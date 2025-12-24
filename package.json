@@ -1,6 +1,6 @@
 {
   "name": "doul-browser",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "DoulBrowser - Gestionnaire de téléchargements avancé",
   "main": "./out/main/index.js",
   "author": {
