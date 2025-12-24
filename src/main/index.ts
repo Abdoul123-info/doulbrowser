@@ -343,6 +343,137 @@ async function autoUpdateYtDlp(): Promise<void> {
   }
 }
 
+// UTILITY: Ensure yt-dlp is available (check bundled or user data)
+function ensureYtDlpAvailable(): string | null {
+  const userDataPath = app.getPath('userData')
+  const platform = process.platform
+  const binaryName = platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+
+  // Check in user data directory first
+  const userDataBinary = join(userDataPath, binaryName)
+  if (existsSync(userDataBinary)) {
+    return userDataBinary
+  }
+
+  // Check in system PATH (fallback)
+  const { execSync } = require('child_process')
+  try {
+    const which = platform === 'win32' ? 'where' : 'which'
+    const result = execSync(`${which} yt-dlp`, { encoding: 'utf8' }).trim()
+    if (result) {
+      console.log('[yt-dlp] Found in system PATH:', result)
+      return result.split('\\n')[0]
+    }
+  } catch (_e) {
+    console.log('[yt-dlp] Not found in system PATH')
+  }
+
+  console.warn('[yt-dlp] Not found.')
+  return null
+}
+
+// UTILITY + AUTO-DOWNLOAD: Ensure FFmpeg is available
+async function ensureFfmpegAvailable(win?: BrowserWindow): Promise<string | null> {
+  const userDataPath = app.getPath('userData')
+  const platform = process.platform
+  const binaryName = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+
+  // 1. Check in user data directory
+  const userDataBinary = join(userDataPath, binaryName)
+  if (existsSync(userDataBinary)) {
+    return userDataBinary
+  }
+
+  // 2. Check in system PATH (Homebrew on macOS, or manual install)
+  const { execSync } = require('child_process')
+  try {
+    const which = platform === 'win32' ? 'where' : 'which'
+    const result = execSync(`${which} ffmpeg`, { encoding: 'utf8' }).trim()
+    if (result) {
+      console.log('[FFmpeg] Found in system PATH:', result)
+      return result.split('\\n')[0]
+    }
+  } catch (_e) {
+    console.log('[FFmpeg] Not found in system PATH')
+  }
+
+  // 3. AUTO-DOWNLOAD for macOS (portable mode)
+  if (platform === 'darwin') {
+    console.log('[FFmpeg] Not found. Downloading for macOS...')
+    try {
+      const https = require('https')
+      const targetPath = join(userDataPath, 'ffmpeg')
+
+      const downloadFile = (url: string, dest: string): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          const file = fs.createWriteStream(dest)
+          https.get(url, (response) => {
+            if (response.statusCode === 302 || response.statusCode === 301) {
+              file.close()
+              if (fs.existsSync(dest)) fs.unlinkSync(dest)
+              const redirectUrl = response.headers.location
+              if (redirectUrl) {
+                downloadFile(redirectUrl, dest).then(resolve).catch(reject)
+              } else {
+                reject(new Error('Redirect location missing'))
+              }
+              return
+            }
+            if (response.statusCode !== 200) {
+              file.close()
+              if (fs.existsSync(dest)) fs.unlinkSync(dest)
+              reject(new Error(`Failed to download: ${response.statusCode}`))
+              return
+            }
+            response.pipe(file)
+            file.on('finish', () => {
+              file.close()
+              fs.chmodSync(dest, 0o755) // Make executable
+              resolve()
+            })
+            file.on('error', (err) => {
+              file.close()
+              if (fs.existsSync(dest)) fs.unlinkSync(dest)
+              reject(err)
+            })
+          }).on('error', (err) => {
+            file.close()
+            if (fs.existsSync(dest)) fs.unlinkSync(dest)
+            reject(err)
+          })
+        })
+      }
+
+      // Download FFmpeg binary for macOS from GitHub (single static binary)
+      const githubUrl = 'https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/darwin-x64'
+      await downloadFile(githubUrl, targetPath)
+      console.log('[FFmpeg] Successfully downloaded for macOS at:', targetPath)
+
+      if (win) {
+        win.webContents.send('notification', {
+          title: 'FFmpeg téléchargé',
+          body: 'FFmpeg a été installé automatiquement'
+        })
+      }
+
+      return targetPath
+    } catch (error) {
+      console.error('[FFmpeg] Auto-download failed:', error)
+      console.log('[FFmpeg] macOS/Linux: Please install ffmpeg via Homebrew or package manager')
+      console.log('[FFmpeg] macOS: brew install ffmpeg')
+      console.log('[FFmpeg] Linux: sudo apt install ffmpeg (Debian/Ubuntu) or sudo yum install ffmpeg (RHEL/CentOS)')
+      return null
+    }
+  }
+
+  // For Windows or if macOS download fails, show manual install instructions
+  console.log('[FFmpeg] Not found.')
+  console.log('[FFmpeg] macOS/Linux: Please install ffmpeg via Homebrew or package manager')
+  console.log('[FFmpeg] macOS: brew install ffmpeg')
+  console.log('[FFmpeg] Linux: sudo apt install ffmpeg (Debian/Ubuntu) or sudo yum install ffmpeg (RHEL/CentOS)')
+  return null
+}
+
 function createWindow(): void {
   console.log('[DEBUG] createWindow() called')
   // Create the browser window.
@@ -2059,7 +2190,7 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.1.1',
+          version: '1.1.3',
           endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )
