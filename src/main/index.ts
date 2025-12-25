@@ -1989,7 +1989,7 @@ function startExtensionServer() {
           JSON.stringify({
             status: 'ok',
             app: 'DoulBrowser',
-            version: '1.2.3',
+            version: '1.2.4',
             endpoints: ['/ping', '/download-detected', '/download-status']
           })
         )
