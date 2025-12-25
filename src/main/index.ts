@@ -483,8 +483,9 @@ async function ensureNodeAvailable(win?: BrowserWindow): Promise<string | null> 
   } catch (e) { }
 
   if (process.platform === 'darwin') {
-    console.log('[Node.js] Not found. Downloading portable Node.js for signature solving...')
-    const downloadUrl = 'https://nodejs.org/dist/v20.10.0/node-v20.10.0-darwin-x64.tar.gz'
+    console.log('[Node.js] Not found. Downloading portable Node.js v18 for signature solving...')
+    // Node 18 is more compatible with older Big Sur versions
+    const downloadUrl = 'https://nodejs.org/dist/v18.20.0/node-v18.20.0-darwin-x64.tar.gz'
     const tempTarPath = targetPath + '.tar.gz'
 
     try {
@@ -509,21 +510,14 @@ async function ensureNodeAvailable(win?: BrowserWindow): Promise<string | null> 
       }
 
       await download(downloadUrl, tempTarPath)
-      console.log('[Node.js] Downloaded tar.gz, extracting...')
+      console.log('[Node.js] Downloaded tar.gz (v18), extracting...')
 
-      execSync(`tar -xzf "${tempTarPath}" -C "${userDataPath}" --strip-components 2 "node-v20.10.0-darwin-x64/bin/node"`)
+      execSync(`tar -xzf "${tempTarPath}" -C "${userDataPath}" --strip-components 2 "node-v18.20.0-darwin-x64/bin/node"`)
       fs.unlinkSync(tempTarPath)
 
       if (fs.existsSync(targetPath)) {
         fs.chmodSync(targetPath, 0o755)
-        console.log('[Node.js] Portable Node.js installed at:', targetPath)
-
-        if (win) {
-          win.webContents.send('notification', {
-            title: 'Moteur JS installé',
-            body: 'Moteur de signature YouTube prêt'
-          })
-        }
+        console.log('[Node.js] Portable Node.js v18 installed at:', targetPath)
         return targetPath
       }
     } catch (error) {
@@ -1593,12 +1587,11 @@ async function downloadWithYtDlp(
         }
       }
 
-      // v23: YouTube client handling - 2025 COMPATIBILITY FIX
-      // 'mweb' and 'android/ios' now require GVS PO-Tokens.
-      // 'web' is currently the most reliable without tokens.
+      // v24: YouTube client handling - 2025 COMPATIBILITY FIX
+      // Use multiple clients to increase chances of finding valid formats without PO-Token
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        console.log('[yt-dlp] YouTube: Using web client (Signature solving optimized)')
-        downloadArgs.push('--extractor-args', 'youtube:player_client=web')
+        console.log('[yt-dlp] YouTube: Using multi-client strategy (Signature solving optimized)')
+        downloadArgs.push('--extractor-args', 'youtube:player_client=web,tv_embedded,mweb')
       }
 
       console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '))
@@ -1638,6 +1631,7 @@ async function downloadWithYtDlp(
         : isMac
           ? [
             app.getPath('userData'), // Search in userData FIRST for portable Node
+            '/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Resources', // Mac JSC
             '/usr/local/bin', // Intel/General
             '/opt/homebrew/bin', // Apple Silicon
             '/usr/bin',
@@ -1677,7 +1671,13 @@ async function downloadWithYtDlp(
         console.warn('[yt-dlp] WARNING: Node.js not found in common paths. YouTube "n" challenge may fail.')
       }
 
-      env['YTDLP_JS_ENGINE'] = 'node'
+      // v24: Mac Specific - Use JavaScriptCore as primary/fallback if Node is failing
+      if (isMac) {
+        env['YTDLP_JS_ENGINE'] = 'javascriptcore,node'
+        console.log('[yt-dlp] Mac Environment: Prioritizing JavaScriptCore for signature solving')
+      } else {
+        env['YTDLP_JS_ENGINE'] = 'node'
+      }
 
       // v23: Ensure portable Node.js is downloaded for Mac if missing
       if (isMac && !nodeFoundDir) {
@@ -2035,7 +2035,7 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.1.8',
+          version: '1.1.9',
           endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )
