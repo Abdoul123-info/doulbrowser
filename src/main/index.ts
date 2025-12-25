@@ -1724,284 +1724,181 @@ async function downloadWithYtDlp(
         }
       }
 
-      const ytDlpProcess = spawn(finalYtDlpPath, downloadArgs, { env })
-
-      let output = ''
-      let stdoutBuffer = ''
-      let errorOutput = ''
-      let filename = customFilename || 'unknown' // Default filename
-      let killTimeout: NodeJS.Timeout | null = null // Safety timeout
-      let wasKilledByTimeout = false
-
-      ytDlpProcess.stdout.on('data', (data) => {
-        const chunk = data.toString()
-        output += chunk
-        stdoutBuffer += chunk
-
-        // Add to persistent logs (keep last 500 lines)
-        const trackerLog = activeDownloads.get(url)
-        if (trackerLog) {
-          if (!trackerLog.logs) trackerLog.logs = []
-          trackerLog.logs.push(chunk)
-          if (trackerLog.logs.length > 500) trackerLog.logs.shift()
-        }
-
-        const lines = stdoutBuffer.split('\n')
-        // Keep the last partial line in the buffer
-        stdoutBuffer = lines.pop() || ''
-
-        for (const line of lines) {
-          const trimmedLine = line.trim()
-          if (!trimmedLine) continue
-
-          // Extract filename from yt-dlp output if not custom
-          if (!customFilename) {
-            const filenameMatch = trimmedLine.match(/\[download\] Destination: (.+)/)
-            if (filenameMatch && filenameMatch[1]) {
-              filename = basename(filenameMatch[1])
+            // v1.2.2: Intelligent Retry Logic for YouTube
+      const performDownload = async () => {
+        const attempts = [
+          {
+            name: 'Strategy 1: TV Embedded (Fast/No Signature)',
+            setup: () => {
+              const cleanArgs = downloadArgs.filter(a => !a.includes('youtube:player_client'))
+              cleanArgs.push('--extractor-args', 'youtube:player_client=tv_embedded')
+              return cleanArgs
+            }
+          },
+          {
+            name: 'Strategy 2: Web Client + Chrome Cookies (Robust Fallback)',
+            setup: () => {
+               const cleanArgs = downloadArgs.filter(a => !a.includes('youtube:player_client'))
+               cleanArgs.push('--extractor-args', 'youtube:player_client=web')
+               if (!cleanArgs.includes('--cookies-from-browser')) {
+                 console.log('[yt-dlp] Retry: Adding --cookies-from-browser chrome')
+                 cleanArgs.push('--cookies-from-browser', 'chrome')
+               }
+               return cleanArgs
             }
           }
+        ]
 
-          // Parse progress
-          // Parse progress - Updated regex to handle "~" (approximate size) and variable spacing
-          const progressMatch = trimmedLine.match(
-            /\[download\]\s+(\d+\.?\d*)%\s+of\s+[~]?\s*(\S+)\s+at\s+(\S+)\s+ETA\s+(\S+)/
-          )
-          if (progressMatch) {
-            const progress = parseFloat(progressMatch[1])
-            const totalSizeStr = progressMatch[2]
-            const speedStr = progressMatch[3]
-            const eta = progressMatch[4]
-
-            const totalBytes = parseSizeToBytes(totalSizeStr)
-            const receivedBytes = (progress / 100) * totalBytes
-            const speed = parseSizeToBytes(speedStr.split('/')[0])
-
-            // Sync state to tracker for reliable resume
-            const tracker = activeDownloads.get(url)
-            if (tracker) {
-              tracker.lastProgress = Math.round(progress)
-              tracker.lastBytes = receivedBytes
-              tracker.filename = filename
-            }
-
-            win.webContents.send('download-progress', {
-              url,
-              progress: Math.round(progress),
-              receivedBytes: receivedBytes,
-              totalBytes: totalBytes,
-              state: 'downloading',
-              speed: speed,
-              timeLeft: eta,
-              originalUrl: url,
-              canResume: true, // Always allow resume UI
-              filename: filename,
-              strategy: 'yt-dlp'
-            })
-          } else if (trimmedLine.includes('[download] 100% of')) {
-            // Sync state for 100% case
-            const tracker = activeDownloads.get(url)
-            const totalBytesFromLine = parseSizeToBytes(
-              trimmedLine.match(/of (\d+\.\d+\w+)/)?.[1] || '0B'
-            )
-            if (tracker) {
-              tracker.lastProgress = 100
-              tracker.lastBytes = totalBytesFromLine
-              tracker.filename = filename
-            }
-
-            win.webContents.send('download-progress', {
-              url,
-              progress: 100,
-              receivedBytes: totalBytesFromLine,
-              totalBytes: totalBytesFromLine,
-              state: 'downloading',
-              speed: 0,
-              timeLeft: '00:00',
-              originalUrl: url,
-              canResume: true, // Always allow resume UI
-              filename: filename,
-              strategy: 'yt-dlp'
-            })
-
-            // SAFETY: Force-kill yt-dlp if it doesn't exit within 10 seconds after reaching 100%
-            if (!killTimeout) {
-              killTimeout = setTimeout(() => {
-                wasKilledByTimeout = true
-                console.warn(`[yt-dlp] Process did not exit after 100%, force-killing for ${url}`)
-
-                try {
-                  // CRITICAL FIX: Mark as complete IMMEDIATELY, don't wait for process to close
-                  // (On Windows, the close event may never fire after SIGKILL)
-                  const finalFilePath = join(savePath, filename)
-
-                  let fileSize = 0
-                  try {
-                    const stats = fs.statSync(finalFilePath)
-                    fileSize = stats.size
-                  } catch (e) {
-                    console.error('Could not get file stats after timeout kill:', e)
-                  }
-
-                  // Send completion event to UI
-                  win.webContents.send('download-complete', {
-                    url,
-                    filePath: finalFilePath,
-                    filename: filename,
-                    totalBytes: fileSize
-                  })
-                  sendNotification(
-                    'Téléchargement terminé',
-                    `${filename} a été téléchargé avec succès`,
-                    true
-                  )
-
-                  // Clean up and prevent retry
-                  handleDownloadEnd(url)
-
-                  // Try to kill process (but don't rely on it)
-                  try {
-                    if (process.platform === 'win32' && ytDlpProcess.pid) {
-                      const { exec } = require('child_process')
-                      exec(`taskkill /F /T /PID ${ytDlpProcess.pid}`, () => { })
-                    } else {
-                      ytDlpProcess.kill('SIGKILL')
-                    }
-                  } catch (e) {
-                    console.error('Error killing process after timeout:', e)
-                  }
-                } catch (err) {
-                  console.error(`[ERROR] Exception in timeout callback:`, err)
-                }
-              }, 10000)
-            }
-          }
-        }
-      })
-
-      ytDlpProcess.stderr.on('data', (data) => {
-        const stderrChunk = data.toString()
-        errorOutput += stderrChunk
-        console.error(`[yt-dlp] stderr: ${stderrChunk}`)
-
-        // Add to persistent logs
-        const trackerLog = activeDownloads.get(url)
-        if (trackerLog) {
-          if (!trackerLog.logs) trackerLog.logs = []
-          trackerLog.logs.push(`[ERROR] ${stderrChunk}`)
-          if (trackerLog.logs.length > 500) trackerLog.logs.shift()
-        }
-      })
-
-      ytDlpProcess.on('close', (code) => {
-        // Clear safety timeout if it exists
-        if (killTimeout) {
-          clearTimeout(killTimeout)
-          killTimeout = null
+        if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+          attempts.length = 0
+          attempts.push({ name: 'Standard Download', setup: () => downloadArgs })
         }
 
-        // CRITICAL: If timeout already handled completion, do nothing here
-        if (wasKilledByTimeout) {
-          console.log(`[yt-dlp] Close event ignored, already handled by timeout for ${url}`)
-          return // Exit early, don't process anything
-        }
+        for (let i = 0; i < attempts.length; i++) {
+          const strategy = attempts[i]
+          console.log(`\n[yt-dlp] --- Attempt ${i + 1}/${attempts.length}: ${strategy.name} ---`)
+          const currentArgs = strategy.setup()
+          console.log(`[yt-dlp] Command: ${finalYtDlpPath} ${currentArgs.join(' ')}`)
 
-        // Normal completion or failure handling
-        if (code === 0) {
-          // ... success handling ...
-          if (!customFilename) {
-            const finalFilenameMatch = output.match(/\[download\] Destination: (.+)/g)
-            if (finalFilenameMatch && finalFilenameMatch.length > 0) {
-              filename = basename(finalFilenameMatch[finalFilenameMatch.length - 1])
-            }
-          }
-          const finalFilePath = join(savePath, filename)
-
-          // Get actual file size
-          let fileSize = 0
           try {
-            const stats = fs.statSync(finalFilePath)
-            fileSize = stats.size
-          } catch (e) {
-            console.error('Could not get file stats:', e)
+            await new Promise((resolve, reject) => {
+              const ytDlpProcess = spawn(finalYtDlpPath, currentArgs, { env })
+              
+              const trackerRef = activeDownloads.get(url)
+              if (trackerRef) trackerRef.process = ytDlpProcess
+
+              let output = ''
+              let stdoutBuffer = ''
+              let errorOutput = ''
+              let filename = customFilename || 'unknown'
+              let killTimeout = null
+              let wasKilledByTimeout = false
+
+              ytDlpProcess.stdout.on('data', (data) => {
+                const chunk = data.toString()
+                output += chunk
+                stdoutBuffer += chunk
+                
+                const trackerLog = activeDownloads.get(url)
+                if (trackerLog) {
+                  if (!trackerLog.logs) trackerLog.logs = []
+                  trackerLog.logs.push(chunk)
+                  if (trackerLog.logs.length > 500) trackerLog.logs.shift()
+                }
+
+                const lines = stdoutBuffer.split('\n')
+                stdoutBuffer = lines.pop() || ''
+
+                for (const line of lines) {
+                  const trimmedLine = line.trim()
+                  if (!trimmedLine) continue
+
+                  if (trimmedLine.includes('[download] Destination:')) {
+                    const match = trimmedLine.match(/Destination: (.+)/)
+                    if (match && match[1]) {
+                      filename = require('path').basename(match[1])
+                      if (trackerRef) trackerRef.filename = filename
+                    }
+                  }
+
+                  if (trimmedLine.includes('[download]') && trimmedLine.includes('%')) {
+                    const progressMatch = trimmedLine.match(/(\d+\.?\d*)%/)
+                    const speedMatch = trimmedLine.match(/at\s+([\d\.]+\w+\/s)/)
+                    const etaMatch = trimmedLine.match(/ETA\s+([\d:]+)/)
+
+                    let percentage = progressMatch ? parseFloat(progressMatch[1]) : 0
+                    const speed = speedMatch ? speedMatch[1] : '0B/s'
+                    const timeLeft = etaMatch ? etaMatch[1] : '--:--'
+                    
+                    // Simple bytes estimation not needed for live update message, just show %
+                    win.webContents.send('download-progress', {
+                      url, progress: percentage, receivedBytes: '...', totalBytes: '...',
+                      state: 'downloading', speed, timeLeft, filename, strategy: 'yt-dlp', canResume: true
+                    })
+                    
+                    if (trackerRef) {
+                       trackerRef.lastProgress = percentage
+                       trackerRef.filename = filename
+                       trackerRef.speed = speed
+                       trackerRef.timeLeft = timeLeft
+                    }
+                  } else if (trimmedLine.includes('[download] 100% of')) {
+                     win.webContents.send('download-progress', {
+                       url, progress: 100, state: 'downloading', speed: 0, timeLeft: '00:00',
+                       canResume: true, filename, strategy: 'yt-dlp'
+                     })
+                     
+                     if (!killTimeout) {
+                       killTimeout = setTimeout(() => {
+                         wasKilledByTimeout = true
+                         resolve(true)
+                         if (ytDlpProcess && !ytDlpProcess.killed) ytDlpProcess.kill('SIGKILL')
+                       }, 10000)
+                     }
+                  }
+                }
+              })
+
+              ytDlpProcess.stderr.on('data', (data) => {
+                  const errChunk = data.toString()
+                  errorOutput += errChunk
+                  console.error('[yt-dlp] stderr:', errChunk)
+                  
+                  const trackerLog = activeDownloads.get(url)
+                  if (trackerLog) {
+                    if (!trackerLog.logs) trackerLog.logs = []
+                    trackerLog.logs.push('ERR: ' + errChunk)
+                  }
+              })
+              
+              ytDlpProcess.on('close', (code) => {
+                 if (killTimeout) clearTimeout(killTimeout)
+                 if (wasKilledByTimeout) return
+
+                 if (code === 0) {
+                   if (!customFilename && filename === 'unknown') {
+                      const m = output.match(/\[download\] Destination: (.+)/g)
+                      if (m && m.length > 0) filename = require('path').basename(m[m.length-1])
+                   }
+                   const finalPath = require('path').join(savePath, filename)
+                   
+                   // Ensure stat check safety
+                   let fileSize = 0
+                   try { fileSize = fs.statSync(finalPath).size } catch(e){}
+
+                   win.webContents.send('download-complete', {
+                      url, filePath: finalPath, filename, totalBytes: fileSize
+                   })
+                   if(win) win.webContents.send('notification', { title: 'Terminé', body: filename })
+                   resolve(true)
+                 } else {
+                   const tracker = activeDownloads.get(url)
+                   if (tracker && (tracker.paused || tracker.cancelled)) {
+                      reject(new Error('Cancelled'))
+                   } else {
+                      // Check known errors for logging
+                      if (errorOutput.includes('Sign in') || errorOutput.includes('403')) {
+                         console.log('Retry-able error detected')
+                      }
+                      reject(new Error(`Exit code ${code}`))
+                   }
+                 }
+              })
+              
+              ytDlpProcess.on('error', reject)
+            })
+            // If resolve(true) reached:
+            return // BREAK LOOP
+          } catch (err) {
+             console.error(`Attempt ${i+1} failed: ${err.message}`)
+             if (i === attempts.length - 1) throw err
           }
-
-          win.webContents.send('download-complete', {
-            url,
-            filePath: finalFilePath,
-            filename: filename,
-            totalBytes: fileSize
-          })
-          sendNotification(
-            'Téléchargement terminé',
-            `${filename} a été téléchargé avec succès`,
-            true
-          )
-        } else {
-          // CHECK IF PAUSED: Don't show error if the user manually paused it
-          const tracker = activeDownloads.get(url)
-          if (tracker && (tracker.paused || tracker.cancelled)) {
-            console.log(`[yt-dlp] Process closed with code ${code} (paused/cancelled) for ${url}`)
-            return
-          }
-
-          console.error(`[yt-dlp] Process failed with code ${code} for ${url}`)
-
-          // Enhanced error message for user
-          let userFriendlyError = "Download failed."
-          if (errorOutput.includes("Sign in to confirm you are not a bot")) {
-            userFriendlyError = "YouTube requires authentication (Bot detection). Please check your browser login."
-          } else if (errorOutput.includes("Incomplete data received")) {
-            userFriendlyError = "Connection interrupted. Check your internet."
-          } else if (errorOutput.includes("PO-Token")) {
-            userFriendlyError = "YouTube blocked this request (PO-Token required). Try again or update the app."
-          }
-
-          // Log the last few lines of stderr for debugging
-          const lastErrorLines = errorOutput.split('\n').slice(-3).join('\n').trim()
-
-          win.webContents.send('download-error', {
-            url,
-            error: userFriendlyError,
-            details: lastErrorLines || `Process exited with code ${code}`
-          })
-
-          // SMART RETRY: If YouTube Extraction failed with cookies, retry WITHOUT cookies
-          const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
-          if (isYouTube && !isRetry && !tracker?.paused) {
-            console.log(
-              `[yt-dlp] YouTube with headers failed, attempting automatic retry WITHOUT headers for ${url}`
-            )
-
-            // Retry: call same function with isRetry = true and nullify headers to avoid cookies
-            const newTracker = activeDownloads.get(url)
-            if (newTracker) {
-              newTracker.headers = { 'User-Agent': requestHeaders['User-Agent'] || 'Mozilla/5.0' }
-              downloadWithYtDlp(url, savePath, _platform, win, formatId, customFilename, true)
-              return // Skip error reporting
-            }
-          }
-
-          console.error(`[yt - dlp] Download failed for ${url} with code ${code}: ${errorOutput} `)
-          win.webContents.send('download-error', { url, error: `yt - dlp failed: ${errorOutput} ` })
         }
-        handleDownloadEnd(url)
-      })
-
-      ytDlpProcess.on('error', (err) => {
-        console.error(`[yt - dlp] Failed to start yt - dlp process for ${url}: ${err.message} `)
-        win.webContents.send('download-error', {
-          url,
-          error: `Failed to start yt - dlp: ${err.message} `
-        })
-        handleDownloadEnd(url)
-      })
-
-      // Store the process to allow cancellation/pause
-      const trackerRef = activeDownloads.get(url)
-      if (trackerRef) {
-        trackerRef.process = ytDlpProcess
       }
+
+      await performDownload()
+      // Post-download cleanup
+      
     } else {
       throw new Error('yt-dlp executable not found.')
     }
