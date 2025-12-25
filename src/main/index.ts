@@ -1562,12 +1562,24 @@ async function downloadWithYtDlp(
 
           for (const cookie of cookies) {
             const [name, ...valueParts] = cookie.split('=')
-            const value = valueParts.join('=') // Handle values with '='
+            const value = valueParts.join('=')
             if (name && value) {
-              // Convert domain to .domain.com format for broader compatibility
-              const cookieDomain = domain.startsWith('.') ? domain : `.${domain}`
-              // Format: domain, flag, path, secure, expiration, name, value
-              netscapeContent += `${cookieDomain}\tTRUE\t/\tFALSE\t${expiration}\t${name}\t${value}\n`
+              // YouTube extreme authentication: Add cookie for multiple domains
+              // This is crucial because YouTube auth is shared between youtube.com and google.com
+              const baseDomain = domain.replace('www.', '')
+              const domainsToRoot = [
+                baseDomain.startsWith('.') ? baseDomain : `.${baseDomain}`,
+                '.youtube.com',
+                '.google.com'
+              ]
+
+              // Remove duplicates
+              const uniqueDomains = [...new Set(domainsToRoot)]
+
+              for (const d of uniqueDomains) {
+                // Format: domain, flag, path, secure, expiration, name, value
+                netscapeContent += `${d}\tTRUE\t/\tFALSE\t${expiration}\t${name}\t${value}\n`
+              }
             }
           }
 
@@ -1587,11 +1599,12 @@ async function downloadWithYtDlp(
         }
       }
 
-      // v24: YouTube client handling - 2025 COMPATIBILITY FIX
-      // Use multiple clients to increase chances of finding valid formats without PO-Token
+      // v25: YouTube client handling - 2025 ULTIMATE COMPATIBILITY
+      // - tv_embedded: bypasses many restrictions and often doesn't need signature
+      // - web: fallback for standard features
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        console.log('[yt-dlp] YouTube: Using multi-client strategy (Signature solving optimized)')
-        downloadArgs.push('--extractor-args', 'youtube:player_client=web,tv_embedded,mweb')
+        console.log('[yt-dlp] YouTube: Using TV & Web clients (Universal bypass mode)')
+        downloadArgs.push('--extractor-args', 'youtube:player_client=tv_embedded,web')
       }
 
       console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '))
@@ -1631,7 +1644,8 @@ async function downloadWithYtDlp(
         : isMac
           ? [
             app.getPath('userData'), // Search in userData FIRST for portable Node
-            '/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Resources', // Mac JSC
+            '/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Resources', // Mac JSC Path A
+            '/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Resources', // Mac JSC Path B
             '/usr/local/bin', // Intel/General
             '/opt/homebrew/bin', // Apple Silicon
             '/usr/bin',
@@ -1671,10 +1685,23 @@ async function downloadWithYtDlp(
         console.warn('[yt-dlp] WARNING: Node.js not found in common paths. YouTube "n" challenge may fail.')
       }
 
-      // v24: Mac Specific - Use JavaScriptCore as primary/fallback if Node is failing
+      // v25: Mac Specific - JavaScriptCore (jsc) is often the only working engine on older Macs
       if (isMac) {
         env['YTDLP_JS_ENGINE'] = 'javascriptcore,node'
-        console.log('[yt-dlp] Mac Environment: Prioritizing JavaScriptCore for signature solving')
+        console.log('[yt-dlp] Mac Environment: Priority Engine [JavaScriptCore > Node]')
+
+        // Ensure jsc is specifically in the PATH
+        const jscPaths = [
+          '/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Resources',
+          '/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Resources'
+        ]
+        for (const jp of jscPaths) {
+          if (existsSync(join(jp, 'jsc'))) {
+            env[pathKey] = `${jp}${isMac ? ':' : ';'}${env[pathKey]}`
+            console.log(`[yt-dlp] Added native Mac JSC to PATH: ${jp}`)
+            break
+          }
+        }
       } else {
         env['YTDLP_JS_ENGINE'] = 'node'
       }
@@ -2035,7 +2062,7 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.1.9',
+          version: '1.2.0',
           endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )
