@@ -1924,925 +1924,926 @@ async function downloadWithYtDlp(
       } else {
         throw new Error('yt-dlp executable not found.')
       }
-    } catch (error: any) {
-      console.error('Error in downloadWithYtDlp:', error)
+    }
+  } catch (error: any) {
+    console.error('Error in downloadWithYtDlp:', error)
 
-      // Cleanup temporary cookie file if it was created
-      if (cookieFile) {
-        try {
-          await fsPromises.unlink(cookieFile)
-          console.log('[yt-dlp] Cleaned up temporary cookie file')
-        } catch (_e) {
-          // Ignore cleanup errors
-        }
+    // Cleanup temporary cookie file if it was created
+    if (cookieFile) {
+      try {
+        await fsPromises.unlink(cookieFile)
+        console.log('[yt-dlp] Cleaned up temporary cookie file')
+      } catch (_e) {
+        // Ignore cleanup errors
       }
+    }
 
-      win.webContents.send('download-error', {
-        url,
-        error: error.message || 'yt-dlp download failed'
-      })
-      handleDownloadEnd(url)
-    } finally {
-      // Final cleanup: delete cookie file if it exists
-      if (cookieFile) {
-        try {
-          if (existsSync(cookieFile)) {
-            await fsPromises.unlink(cookieFile)
-          }
-        } catch (_e) {
-          // Ignore cleanup errors
+    win.webContents.send('download-error', {
+      url,
+      error: error.message || 'yt-dlp download failed'
+    })
+    handleDownloadEnd(url)
+  } finally {
+    // Final cleanup: delete cookie file if it exists
+    if (cookieFile) {
+      try {
+        if (existsSync(cookieFile)) {
+          await fsPromises.unlink(cookieFile)
         }
+      } catch (_e) {
+        // Ignore cleanup errors
       }
     }
   }
+}
 
 // Serveur HTTP pour recevoir les téléchargements détectés par l'extension
 function startExtensionServer() {
-    extensionServer = createServer((req, res) => {
-      // CORS headers pour permettre les requêtes depuis l'extension
-      res.setHeader('Access-Control-Allow-Origin', '*')
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  extensionServer = createServer((req, res) => {
+    // CORS headers pour permettre les requêtes depuis l'extension
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
-      // Headers CORS pour permettre les requêtes depuis l'extension
-      const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      }
+    // Headers CORS pour permettre les requêtes depuis l'extension
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    }
 
-      if (req.method === 'OPTIONS') {
-        res.writeHead(200, corsHeaders)
-        res.end()
-        return
-      }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200, corsHeaders)
+      res.end()
+      return
+    }
 
-      const url = new URL(req.url || '/', `http://${req.headers.host}`)
+    const url = new URL(req.url || '/', `http://${req.headers.host}`)
 
-      // Gérer la route racine
-      if (url.pathname === '/' && req.method === 'GET') {
-        res.writeHead(200, {
-          'Content-Type': 'application/json',
-          ...corsHeaders
+    // Gérer la route racine
+    if (url.pathname === '/' && req.method === 'GET') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        ...corsHeaders
+      })
+      res.end(
+        JSON.stringify({
+          status: 'ok',
+          app: 'DoulBrowser',
+          version: '1.2.5',
+          endpoints: ['/ping', '/download-detected', '/download-status']
         })
-        res.end(
-          JSON.stringify({
-            status: 'ok',
-            app: 'DoulBrowser',
-            version: '1.2.4',
-            endpoints: ['/ping', '/download-detected', '/download-status']
-          })
-        )
-        return
-      }
+      )
+      return
+    }
 
-      // Gérer le favicon.ico (les navigateurs le demandent automatiquement)
-      if (url.pathname === '/favicon.ico') {
-        res.writeHead(204, corsHeaders) // No Content
-        res.end()
-        return
-      }
+    // Gérer le favicon.ico (les navigateurs le demandent automatiquement)
+    if (url.pathname === '/favicon.ico') {
+      res.writeHead(204, corsHeaders) // No Content
+      res.end()
+      return
+    }
 
-      // Endpoint ping pour vérifier que l'application est en cours d'exécution
-      if (url.pathname === '/ping' && req.method === 'GET') {
-        res.writeHead(200, {
-          'Content-Type': 'application/json',
-          ...corsHeaders
-        })
-        res.end(JSON.stringify({ status: 'ok', app: 'DoulBrowser' }))
-        return
-      }
+    // Endpoint ping pour vérifier que l'application est en cours d'exécution
+    if (url.pathname === '/ping' && req.method === 'GET') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        ...corsHeaders
+      })
+      res.end(JSON.stringify({ status: 'ok', app: 'DoulBrowser' }))
+      return
+    }
 
-      // Endpoint pour recevoir les téléchargements détectés
-      if (url.pathname === '/download-detected' && req.method === 'POST') {
-        let body = ''
+    // Endpoint pour recevoir les téléchargements détectés
+    if (url.pathname === '/download-detected' && req.method === 'POST') {
+      let body = ''
 
-        req.on('data', (chunk) => {
-          body += chunk.toString()
-        })
+      req.on('data', (chunk) => {
+        body += chunk.toString()
+      })
 
-        req.on('end', async () => {
-          try {
-            // Vérifier que le body n'est pas vide
-            if (!body || body.trim() === '') {
-              res.writeHead(400, {
-                'Content-Type': 'application/json',
-                ...corsHeaders
-              })
-              res.end(JSON.stringify({ error: 'Empty request body' }))
-              return
-            }
-
-            const data = JSON.parse(body)
-            const downloadUrl = data.url
-            const filename = data.filename || 'download'
-
-            console.log('📥 Download request received from extension:')
-            console.log('  URL:', downloadUrl)
-            console.log('  Filename:', filename)
-            console.log('  Headers:', data.headers ? 'Present' : 'Missing')
-            console.log('  Header details:', JSON.stringify(data.headers, null, 2))
-
-            // Vérifier que l'URL est présente
-            if (!downloadUrl) {
-              res.writeHead(400, {
-                'Content-Type': 'application/json',
-                ...corsHeaders
-              })
-              res.end(JSON.stringify({ error: 'URL is required' }))
-              return
-            }
-
-            // Trouver la fenêtre principale
-            const windows = BrowserWindow.getAllWindows()
-            const mainWindow = windows.find((w) => !w.isDestroyed())
-
-            if (!mainWindow) {
-              res.writeHead(500, {
-                'Content-Type': 'application/json',
-                ...corsHeaders
-              })
-              res.end(JSON.stringify({ error: 'Main window not found' }))
-              return
-            }
-
-            // BRING TO FRONT - User wants to see the download
-            if (mainWindow.isMinimized()) mainWindow.restore()
-            mainWindow.show()
-            mainWindow.focus()
-
-            // Quality Selector: DISABLED categorically for maximum speed (V17)
-            // Direct download proceeds for all sites
-
-            // Ajouter à la file d'attente au lieu de démarrer directement
-            const downloadPath = appSettings.downloadPath
-            console.log('📁 Dossier de téléchargement:', downloadPath)
-
-            // Ajouter à la queue (sera traité automatiquement selon la limite de téléchargements simultanés)
-            addToDownloadQueue(
-              downloadUrl,
-              mainWindow,
-              downloadPath,
-              filename,
-              data.type,
-              data.mimeType,
-              0, // Priorité par défaut
-              data.headers || {}, // Pass headers
-              // Déterminer si audio only
-              (data.mimeType && data.mimeType.startsWith('audio/')) ||
-              (filename && filename.toLowerCase().endsWith('.mp3')) ||
-              false
-            )
-
-            console.log('✅ Download added to queue successfully')
-
-            res.writeHead(200, {
-              'Content-Type': 'application/json',
-              ...corsHeaders
-            })
-            res.end(JSON.stringify({ success: true }))
-          } catch (error: any) {
-            console.error('DoulBrowser: Erreur dans /download-detected:', error)
-            console.error('DoulBrowser: Body reçu:', body)
+      req.on('end', async () => {
+        try {
+          // Vérifier que le body n'est pas vide
+          if (!body || body.trim() === '') {
             res.writeHead(400, {
               'Content-Type': 'application/json',
               ...corsHeaders
             })
-            res.end(
-              JSON.stringify({
-                error: error.message || 'Invalid JSON',
-                details: body ? 'Body received but parsing failed' : 'Empty body'
-              })
-            )
+            res.end(JSON.stringify({ error: 'Empty request body' }))
+            return
           }
-        })
-        return
-      }
 
-      // Endpoint pour obtenir le statut d'un téléchargement
-      if (url.pathname === '/download-status' && req.method === 'GET') {
-        const downloadUrl = url.searchParams.get('url')
-        if (downloadUrl) {
-          // 1. Check in Active Downloads
-          let tracker = activeDownloads.get(downloadUrl)
+          const data = JSON.parse(body)
+          const downloadUrl = data.url
+          const filename = data.filename || 'download'
 
-          if (tracker) {
-            const progress = tracker.lastProgress || 0
-            const receivedBytes = tracker.lastBytes || 0
-            const totalBytes = tracker.item?.getTotalBytes() || (tracker as any).totalBytes || 0
+          console.log('📥 Download request received from extension:')
+          console.log('  URL:', downloadUrl)
+          console.log('  Filename:', filename)
+          console.log('  Headers:', data.headers ? 'Present' : 'Missing')
+          console.log('  Header details:', JSON.stringify(data.headers, null, 2))
 
-            const now = Date.now()
-            let speed = 0
-            if ((tracker as any).lastSpeed && (tracker as any).lastSpeed > 0) {
-              speed = (tracker as any).lastSpeed
-            } else if (tracker.lastTime && tracker.lastTime > 0 && receivedBytes > 0) {
-              const elapsed = (now - tracker.startTime) / 1000
-              speed = elapsed > 0 ? receivedBytes / elapsed : 0
-            } else {
-              const elapsed = (now - tracker.startTime) / 1000
-              speed = elapsed > 0 ? receivedBytes / elapsed : 0
-            }
+          // Vérifier que l'URL est présente
+          if (!downloadUrl) {
+            res.writeHead(400, {
+              'Content-Type': 'application/json',
+              ...corsHeaders
+            })
+            res.end(JSON.stringify({ error: 'URL is required' }))
+            return
+          }
 
-            let speedStr = '0 B/s'
-            if (speed > 0) {
-              if (speed < 1024) speedStr = `${Math.round(speed)} B/s`
-              else if (speed < 1024 * 1024) speedStr = `${(speed / 1024).toFixed(2)} KB/s`
-              else speedStr = `${(speed / (1024 * 1024)).toFixed(2)} MB/s`
-            }
+          // Trouver la fenêtre principale
+          const windows = BrowserWindow.getAllWindows()
+          const mainWindow = windows.find((w) => !w.isDestroyed())
 
-            let timeLeft = '--'
-            if (speed > 0 && totalBytes > 0) {
-              const remaining = totalBytes - receivedBytes
-              const seconds = remaining / speed
-              if (seconds < 60) timeLeft = `${Math.round(seconds)}s`
-              else if (seconds < 3600) timeLeft = `${Math.round(seconds / 60)}m`
-              else timeLeft = `${Math.round(seconds / 3600)}h`
-            }
+          if (!mainWindow) {
+            res.writeHead(500, {
+              'Content-Type': 'application/json',
+              ...corsHeaders
+            })
+            res.end(JSON.stringify({ error: 'Main window not found' }))
+            return
+          }
 
-            let status = 'downloading'
-            if (tracker.cancelled) status = 'cancelled'
-            else if (tracker.paused) status = 'paused'
-            else if (progress >= 100 || (totalBytes > 0 && receivedBytes >= totalBytes)) status = 'completed'
+          // BRING TO FRONT - User wants to see the download
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.show()
+          mainWindow.focus()
 
+          // Quality Selector: DISABLED categorically for maximum speed (V17)
+          // Direct download proceeds for all sites
+
+          // Ajouter à la file d'attente au lieu de démarrer directement
+          const downloadPath = appSettings.downloadPath
+          console.log('📁 Dossier de téléchargement:', downloadPath)
+
+          // Ajouter à la queue (sera traité automatiquement selon la limite de téléchargements simultanés)
+          addToDownloadQueue(
+            downloadUrl,
+            mainWindow,
+            downloadPath,
+            filename,
+            data.type,
+            data.mimeType,
+            0, // Priorité par défaut
+            data.headers || {}, // Pass headers
+            // Déterminer si audio only
+            (data.mimeType && data.mimeType.startsWith('audio/')) ||
+            (filename && filename.toLowerCase().endsWith('.mp3')) ||
+            false
+          )
+
+          console.log('✅ Download added to queue successfully')
+
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          })
+          res.end(JSON.stringify({ success: true }))
+        } catch (error: any) {
+          console.error('DoulBrowser: Erreur dans /download-detected:', error)
+          console.error('DoulBrowser: Body reçu:', body)
+          res.writeHead(400, {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          })
+          res.end(
+            JSON.stringify({
+              error: error.message || 'Invalid JSON',
+              details: body ? 'Body received but parsing failed' : 'Empty body'
+            })
+          )
+        }
+      })
+      return
+    }
+
+    // Endpoint pour obtenir le statut d'un téléchargement
+    if (url.pathname === '/download-status' && req.method === 'GET') {
+      const downloadUrl = url.searchParams.get('url')
+      if (downloadUrl) {
+        // 1. Check in Active Downloads
+        let tracker = activeDownloads.get(downloadUrl)
+
+        if (tracker) {
+          const progress = tracker.lastProgress || 0
+          const receivedBytes = tracker.lastBytes || 0
+          const totalBytes = tracker.item?.getTotalBytes() || (tracker as any).totalBytes || 0
+
+          const now = Date.now()
+          let speed = 0
+          if ((tracker as any).lastSpeed && (tracker as any).lastSpeed > 0) {
+            speed = (tracker as any).lastSpeed
+          } else if (tracker.lastTime && tracker.lastTime > 0 && receivedBytes > 0) {
+            const elapsed = (now - tracker.startTime) / 1000
+            speed = elapsed > 0 ? receivedBytes / elapsed : 0
+          } else {
+            const elapsed = (now - tracker.startTime) / 1000
+            speed = elapsed > 0 ? receivedBytes / elapsed : 0
+          }
+
+          let speedStr = '0 B/s'
+          if (speed > 0) {
+            if (speed < 1024) speedStr = `${Math.round(speed)} B/s`
+            else if (speed < 1024 * 1024) speedStr = `${(speed / 1024).toFixed(2)} KB/s`
+            else speedStr = `${(speed / (1024 * 1024)).toFixed(2)} MB/s`
+          }
+
+          let timeLeft = '--'
+          if (speed > 0 && totalBytes > 0) {
+            const remaining = totalBytes - receivedBytes
+            const seconds = remaining / speed
+            if (seconds < 60) timeLeft = `${Math.round(seconds)}s`
+            else if (seconds < 3600) timeLeft = `${Math.round(seconds / 60)}m`
+            else timeLeft = `${Math.round(seconds / 3600)}h`
+          }
+
+          let status = 'downloading'
+          if (tracker.cancelled) status = 'cancelled'
+          else if (tracker.paused) status = 'paused'
+          else if (progress >= 100 || (totalBytes > 0 && receivedBytes >= totalBytes)) status = 'completed'
+
+          res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders })
+          res.end(JSON.stringify({
+            status, progress, receivedBytes, totalBytes, speed, speedFormatted: speedStr, timeLeft
+          }))
+        }
+        // 2. Check in Queue (Fix for 404 errors)
+        else {
+          const queuedItem = downloadQueue.find(item => item.url === downloadUrl)
+          if (queuedItem) {
             res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders })
             res.end(JSON.stringify({
-              status, progress, receivedBytes, totalBytes, speed, speedFormatted: speedStr, timeLeft
+              status: 'waiting',
+              progress: 0,
+              receivedBytes: 0,
+              totalBytes: 0,
+              speed: 0,
+              speedFormatted: 'Waiting...',
+              timeLeft: '--'
             }))
+          } else {
+            res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders })
+            res.end(JSON.stringify({ error: 'Download not found' }))
           }
-          // 2. Check in Queue (Fix for 404 errors)
-          else {
-            const queuedItem = downloadQueue.find(item => item.url === downloadUrl)
-            if (queuedItem) {
-              res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders })
-              res.end(JSON.stringify({
-                status: 'waiting',
-                progress: 0,
-                receivedBytes: 0,
-                totalBytes: 0,
-                speed: 0,
-                speedFormatted: 'Waiting...',
-                timeLeft: '--'
-              }))
-            } else {
-              res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders })
-              res.end(JSON.stringify({ error: 'Download not found' }))
-            }
-          }
-        } else {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'URL parameter missing' }))
         }
-        return
-      }
-
-      // Endpoints pour pause/resume/cancel depuis l'extension
-      if (url.pathname === '/download-pause' && req.method === 'POST') {
-        let body = ''
-        req.on('data', (chunk) => {
-          body += chunk.toString()
-        })
-        req.on('end', () => {
-          try {
-            const data = JSON.parse(body)
-            const windows = BrowserWindow.getAllWindows()
-            const mainWindow = windows.find((w) => !w.isDestroyed())
-            if (mainWindow) {
-              mainWindow.webContents.send('download-pause', data.url)
-            }
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true }))
-          } catch (_error) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: 'Invalid JSON' }))
-          }
-        })
-        return
-      }
-
-      if (url.pathname === '/download-resume' && req.method === 'POST') {
-        let body = ''
-        req.on('data', (chunk) => {
-          body += chunk.toString()
-        })
-        req.on('end', () => {
-          try {
-            const data = JSON.parse(body)
-            const windows = BrowserWindow.getAllWindows()
-            const mainWindow = windows.find((w) => !w.isDestroyed())
-            if (mainWindow) {
-              mainWindow.webContents.send('download-resume', data.url)
-            }
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true }))
-          } catch (_error) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: 'Invalid JSON' }))
-          }
-        })
-        return
-      }
-
-      if (url.pathname === '/download-cancel' && req.method === 'POST') {
-        let body = ''
-        req.on('data', (chunk) => {
-          body += chunk.toString()
-        })
-        req.on('end', () => {
-          try {
-            const data = JSON.parse(body)
-            const windows = BrowserWindow.getAllWindows()
-            const mainWindow = windows.find((w) => !w.isDestroyed())
-            if (mainWindow) {
-              mainWindow.webContents.send('download-cancel', data.url)
-            }
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true }))
-          } catch (_error) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: 'Invalid JSON' }))
-          }
-        })
-        return
-      }
-
-      // 404 pour les autres routes (silencieux pour éviter les erreurs dans la console)
-      res.writeHead(404, { 'Content-Type': 'text/plain' })
-      res.end('')
-    })
-
-    extensionServer.listen(EXTENSION_PORT, 'localhost', () => {
-      console.log(`✅ Extension server listening on http://localhost:${EXTENSION_PORT}`)
-      console.log('🔍 Server is ready to receive downloads from browser extension')
-    })
-
-    extensionServer.on('error', (error: any) => {
-      if (error.code === 'EADDRINUSE') {
-        console.log(`Port ${EXTENSION_PORT} already in use, extension server may already be running`)
       } else {
-        console.error('Extension server error:', error)
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'URL parameter missing' }))
       }
-    })
+      return
+    }
+
+    // Endpoints pour pause/resume/cancel depuis l'extension
+    if (url.pathname === '/download-pause' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => {
+        body += chunk.toString()
+      })
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body)
+          const windows = BrowserWindow.getAllWindows()
+          const mainWindow = windows.find((w) => !w.isDestroyed())
+          if (mainWindow) {
+            mainWindow.webContents.send('download-pause', data.url)
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true }))
+        } catch (_error) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid JSON' }))
+        }
+      })
+      return
+    }
+
+    if (url.pathname === '/download-resume' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => {
+        body += chunk.toString()
+      })
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body)
+          const windows = BrowserWindow.getAllWindows()
+          const mainWindow = windows.find((w) => !w.isDestroyed())
+          if (mainWindow) {
+            mainWindow.webContents.send('download-resume', data.url)
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true }))
+        } catch (_error) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid JSON' }))
+        }
+      })
+      return
+    }
+
+    if (url.pathname === '/download-cancel' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => {
+        body += chunk.toString()
+      })
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body)
+          const windows = BrowserWindow.getAllWindows()
+          const mainWindow = windows.find((w) => !w.isDestroyed())
+          if (mainWindow) {
+            mainWindow.webContents.send('download-cancel', data.url)
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true }))
+        } catch (_error) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid JSON' }))
+        }
+      })
+      return
+    }
+
+    // 404 pour les autres routes (silencieux pour éviter les erreurs dans la console)
+    res.writeHead(404, { 'Content-Type': 'text/plain' })
+    res.end('')
+  })
+
+  extensionServer.listen(EXTENSION_PORT, 'localhost', () => {
+    console.log(`✅ Extension server listening on http://localhost:${EXTENSION_PORT}`)
+    console.log('🔍 Server is ready to receive downloads from browser extension')
+  })
+
+  extensionServer.on('error', (error: any) => {
+    if (error.code === 'EADDRINUSE') {
+      console.log(`Port ${EXTENSION_PORT} already in use, extension server may already be running`)
+    } else {
+      console.error('Extension server error:', error)
+    }
+  })
+}
+
+// This method will be called when Electron has finished
+// initialization and is ready to create browser windows.
+// Some APIs can only be used after this event occurs.
+app.whenReady().then(() => {
+  // Set app user model id for windows
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.doulbrowser.app')
   }
 
-  // This method will be called when Electron has finished
-  // initialization and is ready to create browser windows.
-  // Some APIs can only be used after this event occurs.
-  app.whenReady().then(() => {
-    // Set app user model id for windows
-    if (process.platform === 'win32') {
-      app.setAppUserModelId('com.doulbrowser.app')
+  console.log('[DEBUG] app.whenReady() triggered')
+  // Load Settings
+  appSettings = loadSettings()
+  maxConcurrentDownloads = appSettings.maxConcurrentDownloads
+
+  // Activer l'extension de capture de téléchargements (style IDM)
+  try {
+    // v20: Robust extension path detection
+    const possiblePaths = [
+      join(__dirname, '..', '..', '..', 'extension_clean'), // Dev: logi/src/main -> logi/extension_clean
+      join(process.resourcesPath, 'extension_clean'), // Prod: resources/extension_clean
+      join(app.getAppPath(), 'extension_clean'), // Fallback
+      join(app.getAppPath(), '..', 'extension_clean'), // Fallback 2
+      'C:\\Users\\ABDOUL JABBAR\\Desktop\\Nouveau dossier\\logi\\extension_clean' // Direct path fallback
+    ]
+
+    let extensionPath = ''
+    for (const p of possiblePaths) {
+      if (existsSync(p)) {
+        extensionPath = p
+        break
+      }
     }
 
-    console.log('[DEBUG] app.whenReady() triggered')
-    // Load Settings
-    appSettings = loadSettings()
-    maxConcurrentDownloads = appSettings.maxConcurrentDownloads
+    console.log('Loading extension from:', extensionPath || 'NOT FOUND')
 
-    // Activer l'extension de capture de téléchargements (style IDM)
-    try {
-      // v20: Robust extension path detection
-      const possiblePaths = [
-        join(__dirname, '..', '..', '..', 'extension_clean'), // Dev: logi/src/main -> logi/extension_clean
-        join(process.resourcesPath, 'extension_clean'), // Prod: resources/extension_clean
-        join(app.getAppPath(), 'extension_clean'), // Fallback
-        join(app.getAppPath(), '..', 'extension_clean'), // Fallback 2
-        'C:\\Users\\ABDOUL JABBAR\\Desktop\\Nouveau dossier\\logi\\extension_clean' // Direct path fallback
-      ]
-
-      let extensionPath = ''
-      for (const p of possiblePaths) {
-        if (existsSync(p)) {
-          extensionPath = p
-          break
-        }
-      }
-
-      console.log('Loading extension from:', extensionPath || 'NOT FOUND')
-
-      if (extensionPath && existsSync(extensionPath)) {
-        // v20: Use modern API session.extensions.loadExtension
-        session.defaultSession.extensions
-          .loadExtension(extensionPath, { allowFileAccess: true })
-          .then((ext) => console.log('Extension loaded successfully:', ext.name))
-          .catch((err) => console.error('Failed to load extension:', err))
-      } else {
-        console.error('Extension not found in any of the possible paths.')
-      }
-    } catch (err) {
-      console.error('Error loading extension:', err)
+    if (extensionPath && existsSync(extensionPath)) {
+      // v20: Use modern API session.extensions.loadExtension
+      session.defaultSession.extensions
+        .loadExtension(extensionPath, { allowFileAccess: true })
+        .then((ext) => console.log('Extension loaded successfully:', ext.name))
+        .catch((err) => console.error('Failed to load extension:', err))
+    } else {
+      console.error('Extension not found in any of the possible paths.')
     }
+  } catch (err) {
+    console.error('Error loading extension:', err)
+  }
 
-    // Configurer l'auto-démarrage selon les paramètres
-    app.setLoginItemSettings({
-      openAtLogin: appSettings.autoStart,
-      openAsHidden: false
-    })
+  // Configurer l'auto-démarrage selon les paramètres
+  app.setLoginItemSettings({
+    openAtLogin: appSettings.autoStart,
+    openAsHidden: false
+  })
 
-    // Default open or close DevTools by F12 in development
-    // and ignore CommandOrControl + R in production.
-    // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
-    // app.on('browser-window-created', (_, window) => {
-    //   optimizer.watchWindowShortcuts(window)
-    // })
+  // Default open or close DevTools by F12 in development
+  // and ignore CommandOrControl + R in production.
+  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
+  // app.on('browser-window-created', (_, window) => {
+  //   optimizer.watchWindowShortcuts(window)
+  // })
 
-    // IPC test
-    ipcMain.on('ping', () => console.log('pong'))
+  // IPC test
+  ipcMain.on('ping', () => console.log('pong'))
 
-    // IPC Handler for custom downloads (from Quality Selector)
-    ipcMain.on('start-download-custom', async (event, { url, formatId, filename, audioOnly }) => {
-      const mainWindow = BrowserWindow.fromWebContents(event.sender)
-      if (!mainWindow) return
+  // IPC Handler for custom downloads (from Quality Selector)
+  ipcMain.on('start-download-custom', async (event, { url, formatId, filename, audioOnly }) => {
+    const mainWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!mainWindow) return
 
-      if (audioOnly) {
-        // Create/Update tracker with audio flag
-        let tracker = activeDownloads.get(url)
-        if (!tracker) {
-          tracker = {
-            item: null, // Fix lint: required property
-            url,
-            startTime: Date.now(),
-            lastBytes: 0,
-            lastTime: Date.now(),
-            audioOnly: true,
-            strategy: 'yt-dlp'
-          }
-          activeDownloads.set(url, tracker)
-        } else {
-          tracker.audioOnly = true
-        }
-      }
-
-      // Delegate to yt-dlp with specific format
-      await downloadWithYtDlp(
-        url,
-        appSettings.downloadPath,
-        'Generic',
-        mainWindow,
-        formatId,
-        filename
-      )
-    })
-
-    // Handle get-video-info for Quality Selector
-    ipcMain.handle('get-video-info', async (_event, url: string) => {
-      try {
-        const info = await fetchVideoInfo(url)
-
-        const allFormats = info.formats || []
-
-        // Video formats (those with video codec)
-        const videoFormats = allFormats
-          .filter((f: any) => f.vcodec !== 'none')
-          .map((f: any) => ({
-            id: f.format_id,
-            ext: f.ext,
-            resolution: f.resolution || (f.height ? `${f.height}p` : 'unknown'),
-            height: f.height || 0,
-            filesize: f.filesize || f.filesize_approx,
-            note: f.format_note || '',
-            vcodec: f.vcodec,
-            acodec: f.acodec
-          }))
-          .sort((a: any, b: any) => b.height - a.height) // Highest resolution first
-
-        // Audio formats (those with audio codec and NO video)
-        const audioFormats = allFormats
-          .filter((f: any) => f.vcodec === 'none' && f.acodec !== 'none')
-          .map((f: any) => ({
-            id: f.format_id,
-            ext: f.ext,
-            filesize: f.filesize || f.filesize_approx,
-            abr: f.abr || 0,
-            note: f.format_note || ''
-          }))
-          .sort((a: any, b: any) => b.abr - a.abr)
-
-        return {
-          title: info.title,
-          thumbnail: info.thumbnail,
-          duration: info.duration,
-          videoFormats,
-          audioFormats
-        }
-      } catch (error: any) {
-        console.error('[IPC] get-video-info error:', error)
-        throw error
-      }
-    })
-
-    ipcMain.on('download-start', async (event, url: string, savePath?: string) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (!win) return
-
-      try {
-        // Use the centralized queue system which now handles Plugins, Smart Routing, and Audio Support
-        const downloadFolder = savePath || appSettings.downloadPath
-        console.log(`[Manual Download] Adding to queue: ${url}`)
-
-        // Determine if audio only based on simple heuristic (if user provides direct mp3 link OR filename has .mp3)
-        // For manual input, we can't easily guess so we default to false (Video) unless obvious
-        const isAudio =
-          url.toLowerCase().includes('.mp3') ||
-          url.toLowerCase().includes('.m4a') ||
-          url.toLowerCase().includes('soundcloud.com')
-
-        console.log(`[Manual Download] Processing: ${url}, Audio Detected: ${isAudio}`)
-
-        // NEW LOGIC: Check for YouTube and trigger Quality Selector (Manual Add)
-        // REMOVED: Manual YouTube Quality Selector trigger
-        // Now YouTube URLs will fall through to addToDownloadQueue and be handled by the YouTubePlugin (Direct Download)
-
-        addToDownloadQueue(
-          url,
-          win,
-          downloadFolder,
-          isAudio ? `Audio_${Date.now()}.mp3` : undefined, // Force filename hint for audio
-          undefined, // type
-          undefined, // mimeType
-          1, // Higher priority for manual downloads
-          {}, // No special headers for manual input (unless plugins add them later)
-          isAudio // Pass audioOnly flag TRUE if audio detected
-        )
-      } catch (error: any) {
-        win.webContents.send('download-error', {
-          url,
-          error: error.message || 'Failed to start download'
-        })
-      }
-    })
-
-    ipcMain.on('download-pause', (event, url: string) => {
-      const tracker = activeDownloads.get(url)
-      const win = BrowserWindow.fromWebContents(event.sender)
-
-      // Cas 1 : téléchargement \"classique\" géré par Electron
-      if (tracker && tracker.item && !tracker.item.isPaused()) {
-        tracker.item.pause()
-        // Send the last known progress percentage when pausing
-        win?.webContents.send('download-paused', {
-          url,
-          progress: tracker.lastProgress !== undefined ? tracker.lastProgress : 0
-        })
-        return
-      }
-
-      // Cas 2 : téléchargement multi-threaded (fichiers directs)
-      if (tracker && tracker.httpRequests && tracker.httpRequests.length > 0) {
-        tracker.paused = true
-        tracker.cancelled = false
-        // Annuler toutes les requêtes HTTP
-        tracker.httpRequests.forEach((req) => {
-          try {
-            req.destroy()
-          } catch (error) {
-            console.error('Error destroying HTTP request:', error)
-          }
-        })
-        tracker.httpRequests = []
-        win?.webContents.send('download-paused', {
-          url,
-          progress: tracker.lastProgress !== undefined ? tracker.lastProgress : 0
-        })
-        return
-      }
-
-      // Cas 3 : téléchargement géré par yt-dlp (process externe)
-      if (tracker && tracker.process) {
-        // Marquer comme paused AVANT de tuer le processus
-        tracker.paused = true
-        tracker.cancelled = false
-
-        try {
-          // Détacher les listeners pour éviter les mises à jour après la pause
-          if (tracker.process.stdout) {
-            tracker.process.stdout.removeAllListeners('data')
-          }
-          if (tracker.process.stderr) {
-            tracker.process.stderr.removeAllListeners('data')
-          }
-
-          // Détacher aussi les listeners 'close' et 'error' pour éviter les événements après pause
-          tracker.process.removeAllListeners('close')
-          tracker.process.removeAllListeners('error')
-
-          // Forcer l'arrêt immédiat avec SIGKILL
-          if (tracker.process.killed === false && tracker.process.pid) {
-            try {
-              // Sur Windows, utiliser taskkill pour forcer l'arrêt
-              if (process.platform === 'win32' && tracker.process.pid) {
-                const { exec } = require('child_process')
-                exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => { })
-              } else {
-                tracker.process.kill('SIGKILL')
-              }
-            } catch (killError) {
-              console.error('Error killing process:', killError)
-            }
-          }
-
-          // Nettoyer la référence au processus
-          tracker.process = undefined
-
-          // DECREMENT count to allow other queued downloads to start
-          if (activeDownloadCount > 0) activeDownloadCount--
-          processDownloadQueue()
-        } catch (error) {
-          console.error('Error killing yt-dlp process for pause:', error)
-        }
-
-        // Send the last known progress percentage when pausing
-        win?.webContents.send('download-paused', {
-          url,
-          progress: tracker.lastProgress !== undefined ? tracker.lastProgress : 0
-        })
-      }
-    })
-
-    ipcMain.on('download-resume', (event, url: string, savePath?: string, filename?: string) => {
-      console.log(`[IPC] download-resume received for: ${url}`)
+    if (audioOnly) {
+      // Create/Update tracker with audio flag
       let tracker = activeDownloads.get(url)
-      const win = BrowserWindow.fromWebContents(event.sender)
-
-      // If tracker is missing (e.g. after error/restart), try to recreate it
-      if (!tracker && savePath) {
-        console.log(`[Resume] Tracker missing for ${url}, recreating...`)
-
-        // Determine strategy again using the same routing logic as startDownloadFromQueue
-        let strategy: 'yt-dlp' | 'direct' | 'electron' = 'direct'
-        const plugin = pluginManager.getPlugin(url)
-        if (plugin) {
-          const strat = plugin.getStrategy(url)
-          strategy = strat === 'yt-dlp' ? 'yt-dlp' : 'direct'
-        } else {
-          const { isSocial } = isSocialMediaURL(url)
-          if (isSocial) strategy = 'yt-dlp'
-        }
-
+      if (!tracker) {
         tracker = {
-          item: null,
-          url: url,
+          item: null, // Fix lint: required property
+          url,
           startTime: Date.now(),
           lastBytes: 0,
           lastTime: Date.now(),
-          savePath: savePath,
-          isYouTube: url.includes('youtube.com') || url.includes('youtu.be'),
-          filename: filename,
-          paused: true,
-          strategy: strategy
+          audioOnly: true,
+          strategy: 'yt-dlp'
         }
         activeDownloads.set(url, tracker)
-      }
-
-      // Cas 1 : téléchargement "classique" géré par Electron
-      if (tracker && tracker.item) {
-        if (tracker.item.isPaused()) {
-          tracker.item.resume()
-        } else if (tracker.item.getState() === 'interrupted' && tracker.item.canResume()) {
-          // Resume interrupted download
-          tracker.item.resume()
-          // Reset tracker for speed calculation
-          tracker.lastBytes = tracker.item.getReceivedBytes()
-          tracker.lastTime = Date.now()
-        }
-        win?.webContents.send('download-resumed', { url })
-        return
-      }
-
-      // Cas 2 : téléchargement yt-dlp : on relance yt-dlp avec --continue
-      if (
-        tracker &&
-        !tracker.process &&
-        tracker.savePath &&
-        (tracker.strategy === 'yt-dlp' || tracker.isYouTube || isSocialMediaURL(url).isSocial)
-      ) {
-        tracker.paused = false
-        activeDownloadCount++ // Increment back while it's active
-
-        // Envoyer immédiatement le pourcentage actuel pour éviter qu'il revienne à 0
-        const currentProgress = tracker.lastProgress || 0
-        const currentBytes = tracker.lastBytes || 0
-
-        win?.webContents.send('download-progress', {
-          url: url,
-          progress: currentProgress,
-          receivedBytes: currentBytes,
-          totalBytes: 0,
-          state: 'downloading',
-          speed: 0,
-          timeLeft: '--',
-          originalUrl: url,
-          canResume: true,
-          filename: tracker.filename
-        })
-
-        win?.webContents.send('download-resumed', { url })
-          ; (async () => {
-            try {
-              const { platform } = isSocialMediaURL(url)
-              await downloadWithYtDlp(
-                url,
-                tracker.savePath as string,
-                platform || (tracker.isYouTube ? 'YouTube' : ''),
-                win!,
-                undefined,
-                tracker.filename
-              )
-            } catch (error: any) {
-              win?.webContents.send('download-error', {
-                url,
-                error: error.message || 'Failed to resume download'
-              })
-            }
-          })()
-        return
-      }
-
-      // Cas 3 : téléchargement multi-threaded : reprendre à partir des segments déjà téléchargés
-      if (tracker && tracker.savePath && !tracker.item && !tracker.process) {
-        tracker.paused = false
-        activeDownloadCount++ // Increment back
-
-        // Envoyer immédiatement le pourcentage actuel pour éviter qu'il revienne à 0
-        const currentProgress = tracker.lastProgress || 0
-        const currentBytes = tracker.lastBytes || 0
-
-        win?.webContents.send('download-progress', {
-          url: url,
-          progress: currentProgress,
-          receivedBytes: currentBytes,
-          totalBytes: 0,
-          state: 'downloading',
-          speed: 0,
-          timeLeft: '--',
-          originalUrl: url,
-          canResume: true,
-          filename: tracker.filename
-        })
-
-        win?.webContents.send('download-resumed', { url })
-
-          // Relancer le téléchargement multi-threaded
-          ; (async () => {
-            try {
-              if (win) {
-                await downloadWithMultiThreading(url, tracker.savePath!, win)
-              }
-            } catch (error: any) {
-              win?.webContents.send('download-error', {
-                url,
-                error: error.message || 'Failed to resume download'
-              })
-            }
-          })()
-      }
-    })
-
-    ipcMain.on('download-cancel', (_event, url: string) => {
-      stopDownload(url)
-    })
-
-    ipcMain.on('download-open-folder', async (_event, url: string) => {
-      const tracker = activeDownloads.get(url)
-      if (tracker && tracker.savePath) {
-        const path = tracker.savePath
-        // Open the folder containing the file
-        shell.showItemInFolder(path)
       } else {
-        // If no save path, open downloads folder
-        shell.openPath(app.getPath('downloads'))
+        tracker.audioOnly = true
       }
-    })
+    }
 
-    ipcMain.handle('download-select-path', async () => {
-      const win = BrowserWindow.getFocusedWindow()
-      if (!win) return null
+    // Delegate to yt-dlp with specific format
+    await downloadWithYtDlp(
+      url,
+      appSettings.downloadPath,
+      'Generic',
+      mainWindow,
+      formatId,
+      filename
+    )
+  })
 
-      const result = await dialog.showOpenDialog(win, {
-        properties: ['openDirectory']
+  // Handle get-video-info for Quality Selector
+  ipcMain.handle('get-video-info', async (_event, url: string) => {
+    try {
+      const info = await fetchVideoInfo(url)
+
+      const allFormats = info.formats || []
+
+      // Video formats (those with video codec)
+      const videoFormats = allFormats
+        .filter((f: any) => f.vcodec !== 'none')
+        .map((f: any) => ({
+          id: f.format_id,
+          ext: f.ext,
+          resolution: f.resolution || (f.height ? `${f.height}p` : 'unknown'),
+          height: f.height || 0,
+          filesize: f.filesize || f.filesize_approx,
+          note: f.format_note || '',
+          vcodec: f.vcodec,
+          acodec: f.acodec
+        }))
+        .sort((a: any, b: any) => b.height - a.height) // Highest resolution first
+
+      // Audio formats (those with audio codec and NO video)
+      const audioFormats = allFormats
+        .filter((f: any) => f.vcodec === 'none' && f.acodec !== 'none')
+        .map((f: any) => ({
+          id: f.format_id,
+          ext: f.ext,
+          filesize: f.filesize || f.filesize_approx,
+          abr: f.abr || 0,
+          note: f.format_note || ''
+        }))
+        .sort((a: any, b: any) => b.abr - a.abr)
+
+      return {
+        title: info.title,
+        thumbnail: info.thumbnail,
+        duration: info.duration,
+        videoFormats,
+        audioFormats
+      }
+    } catch (error: any) {
+      console.error('[IPC] get-video-info error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.on('download-start', async (event, url: string, savePath?: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return
+
+    try {
+      // Use the centralized queue system which now handles Plugins, Smart Routing, and Audio Support
+      const downloadFolder = savePath || appSettings.downloadPath
+      console.log(`[Manual Download] Adding to queue: ${url}`)
+
+      // Determine if audio only based on simple heuristic (if user provides direct mp3 link OR filename has .mp3)
+      // For manual input, we can't easily guess so we default to false (Video) unless obvious
+      const isAudio =
+        url.toLowerCase().includes('.mp3') ||
+        url.toLowerCase().includes('.m4a') ||
+        url.toLowerCase().includes('soundcloud.com')
+
+      console.log(`[Manual Download] Processing: ${url}, Audio Detected: ${isAudio}`)
+
+      // NEW LOGIC: Check for YouTube and trigger Quality Selector (Manual Add)
+      // REMOVED: Manual YouTube Quality Selector trigger
+      // Now YouTube URLs will fall through to addToDownloadQueue and be handled by the YouTubePlugin (Direct Download)
+
+      addToDownloadQueue(
+        url,
+        win,
+        downloadFolder,
+        isAudio ? `Audio_${Date.now()}.mp3` : undefined, // Force filename hint for audio
+        undefined, // type
+        undefined, // mimeType
+        1, // Higher priority for manual downloads
+        {}, // No special headers for manual input (unless plugins add them later)
+        isAudio // Pass audioOnly flag TRUE if audio detected
+      )
+    } catch (error: any) {
+      win.webContents.send('download-error', {
+        url,
+        error: error.message || 'Failed to start download'
+      })
+    }
+  })
+
+  ipcMain.on('download-pause', (event, url: string) => {
+    const tracker = activeDownloads.get(url)
+    const win = BrowserWindow.fromWebContents(event.sender)
+
+    // Cas 1 : téléchargement \"classique\" géré par Electron
+    if (tracker && tracker.item && !tracker.item.isPaused()) {
+      tracker.item.pause()
+      // Send the last known progress percentage when pausing
+      win?.webContents.send('download-paused', {
+        url,
+        progress: tracker.lastProgress !== undefined ? tracker.lastProgress : 0
+      })
+      return
+    }
+
+    // Cas 2 : téléchargement multi-threaded (fichiers directs)
+    if (tracker && tracker.httpRequests && tracker.httpRequests.length > 0) {
+      tracker.paused = true
+      tracker.cancelled = false
+      // Annuler toutes les requêtes HTTP
+      tracker.httpRequests.forEach((req) => {
+        try {
+          req.destroy()
+        } catch (error) {
+          console.error('Error destroying HTTP request:', error)
+        }
+      })
+      tracker.httpRequests = []
+      win?.webContents.send('download-paused', {
+        url,
+        progress: tracker.lastProgress !== undefined ? tracker.lastProgress : 0
+      })
+      return
+    }
+
+    // Cas 3 : téléchargement géré par yt-dlp (process externe)
+    if (tracker && tracker.process) {
+      // Marquer comme paused AVANT de tuer le processus
+      tracker.paused = true
+      tracker.cancelled = false
+
+      try {
+        // Détacher les listeners pour éviter les mises à jour après la pause
+        if (tracker.process.stdout) {
+          tracker.process.stdout.removeAllListeners('data')
+        }
+        if (tracker.process.stderr) {
+          tracker.process.stderr.removeAllListeners('data')
+        }
+
+        // Détacher aussi les listeners 'close' et 'error' pour éviter les événements après pause
+        tracker.process.removeAllListeners('close')
+        tracker.process.removeAllListeners('error')
+
+        // Forcer l'arrêt immédiat avec SIGKILL
+        if (tracker.process.killed === false && tracker.process.pid) {
+          try {
+            // Sur Windows, utiliser taskkill pour forcer l'arrêt
+            if (process.platform === 'win32' && tracker.process.pid) {
+              const { exec } = require('child_process')
+              exec(`taskkill /F /T /PID ${tracker.process.pid}`, () => { })
+            } else {
+              tracker.process.kill('SIGKILL')
+            }
+          } catch (killError) {
+            console.error('Error killing process:', killError)
+          }
+        }
+
+        // Nettoyer la référence au processus
+        tracker.process = undefined
+
+        // DECREMENT count to allow other queued downloads to start
+        if (activeDownloadCount > 0) activeDownloadCount--
+        processDownloadQueue()
+      } catch (error) {
+        console.error('Error killing yt-dlp process for pause:', error)
+      }
+
+      // Send the last known progress percentage when pausing
+      win?.webContents.send('download-paused', {
+        url,
+        progress: tracker.lastProgress !== undefined ? tracker.lastProgress : 0
+      })
+    }
+  })
+
+  ipcMain.on('download-resume', (event, url: string, savePath?: string, filename?: string) => {
+    console.log(`[IPC] download-resume received for: ${url}`)
+    let tracker = activeDownloads.get(url)
+    const win = BrowserWindow.fromWebContents(event.sender)
+
+    // If tracker is missing (e.g. after error/restart), try to recreate it
+    if (!tracker && savePath) {
+      console.log(`[Resume] Tracker missing for ${url}, recreating...`)
+
+      // Determine strategy again using the same routing logic as startDownloadFromQueue
+      let strategy: 'yt-dlp' | 'direct' | 'electron' = 'direct'
+      const plugin = pluginManager.getPlugin(url)
+      if (plugin) {
+        const strat = plugin.getStrategy(url)
+        strategy = strat === 'yt-dlp' ? 'yt-dlp' : 'direct'
+      } else {
+        const { isSocial } = isSocialMediaURL(url)
+        if (isSocial) strategy = 'yt-dlp'
+      }
+
+      tracker = {
+        item: null,
+        url: url,
+        startTime: Date.now(),
+        lastBytes: 0,
+        lastTime: Date.now(),
+        savePath: savePath,
+        isYouTube: url.includes('youtube.com') || url.includes('youtu.be'),
+        filename: filename,
+        paused: true,
+        strategy: strategy
+      }
+      activeDownloads.set(url, tracker)
+    }
+
+    // Cas 1 : téléchargement "classique" géré par Electron
+    if (tracker && tracker.item) {
+      if (tracker.item.isPaused()) {
+        tracker.item.resume()
+      } else if (tracker.item.getState() === 'interrupted' && tracker.item.canResume()) {
+        // Resume interrupted download
+        tracker.item.resume()
+        // Reset tracker for speed calculation
+        tracker.lastBytes = tracker.item.getReceivedBytes()
+        tracker.lastTime = Date.now()
+      }
+      win?.webContents.send('download-resumed', { url })
+      return
+    }
+
+    // Cas 2 : téléchargement yt-dlp : on relance yt-dlp avec --continue
+    if (
+      tracker &&
+      !tracker.process &&
+      tracker.savePath &&
+      (tracker.strategy === 'yt-dlp' || tracker.isYouTube || isSocialMediaURL(url).isSocial)
+    ) {
+      tracker.paused = false
+      activeDownloadCount++ // Increment back while it's active
+
+      // Envoyer immédiatement le pourcentage actuel pour éviter qu'il revienne à 0
+      const currentProgress = tracker.lastProgress || 0
+      const currentBytes = tracker.lastBytes || 0
+
+      win?.webContents.send('download-progress', {
+        url: url,
+        progress: currentProgress,
+        receivedBytes: currentBytes,
+        totalBytes: 0,
+        state: 'downloading',
+        speed: 0,
+        timeLeft: '--',
+        originalUrl: url,
+        canResume: true,
+        filename: tracker.filename
       })
 
-      if (!result.canceled && result.filePaths.length > 0) {
-        return result.filePaths[0]
+      win?.webContents.send('download-resumed', { url })
+        ; (async () => {
+          try {
+            const { platform } = isSocialMediaURL(url)
+            await downloadWithYtDlp(
+              url,
+              tracker.savePath as string,
+              platform || (tracker.isYouTube ? 'YouTube' : ''),
+              win!,
+              undefined,
+              tracker.filename
+            )
+          } catch (error: any) {
+            win?.webContents.send('download-error', {
+              url,
+              error: error.message || 'Failed to resume download'
+            })
+          }
+        })()
+      return
+    }
+
+    // Cas 3 : téléchargement multi-threaded : reprendre à partir des segments déjà téléchargés
+    if (tracker && tracker.savePath && !tracker.item && !tracker.process) {
+      tracker.paused = false
+      activeDownloadCount++ // Increment back
+
+      // Envoyer immédiatement le pourcentage actuel pour éviter qu'il revienne à 0
+      const currentProgress = tracker.lastProgress || 0
+      const currentBytes = tracker.lastBytes || 0
+
+      win?.webContents.send('download-progress', {
+        url: url,
+        progress: currentProgress,
+        receivedBytes: currentBytes,
+        totalBytes: 0,
+        state: 'downloading',
+        speed: 0,
+        timeLeft: '--',
+        originalUrl: url,
+        canResume: true,
+        filename: tracker.filename
+      })
+
+      win?.webContents.send('download-resumed', { url })
+
+        // Relancer le téléchargement multi-threaded
+        ; (async () => {
+          try {
+            if (win) {
+              await downloadWithMultiThreading(url, tracker.savePath!, win)
+            }
+          } catch (error: any) {
+            win?.webContents.send('download-error', {
+              url,
+              error: error.message || 'Failed to resume download'
+            })
+          }
+        })()
+    }
+  })
+
+  ipcMain.on('download-cancel', (_event, url: string) => {
+    stopDownload(url)
+  })
+
+  ipcMain.on('download-open-folder', async (_event, url: string) => {
+    const tracker = activeDownloads.get(url)
+    if (tracker && tracker.savePath) {
+      const path = tracker.savePath
+      // Open the folder containing the file
+      shell.showItemInFolder(path)
+    } else {
+      // If no save path, open downloads folder
+      shell.openPath(app.getPath('downloads'))
+    }
+  })
+
+  ipcMain.handle('download-select-path', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (!win) return null
+
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory']
+    })
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      return result.filePaths[0]
+    }
+    return null
+  })
+
+  // Handlers pour les paramètres
+  ipcMain.handle('get-settings', () => {
+    return appSettings
+  })
+
+  ipcMain.handle('save-settings', (_event, settings: Partial<AppSettings>) => {
+    const saved = saveSettings(settings)
+    if (saved) {
+      appSettings = saved
+
+      // Mettre à jour l'auto-démarrage si changé
+      if (settings.autoStart !== undefined) {
+        app.setLoginItemSettings({
+          openAtLogin: settings.autoStart,
+          openAsHidden: false
+        })
       }
-      return null
+    }
+    return saved
+  })
+
+  // Handler pour accepter un téléchargement détecté
+  ipcMain.on('accept-detected-download', async (event, url: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return
+
+    // Demander le dossier de destination
+    const savePath = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      title: 'Sélectionner le dossier de téléchargement'
     })
 
-    // Handlers pour les paramètres
-    ipcMain.handle('get-settings', () => {
-      return appSettings
-    })
-
-    ipcMain.handle('save-settings', (_event, settings: Partial<AppSettings>) => {
-      const saved = saveSettings(settings)
-      if (saved) {
-        appSettings = saved
-
-        // Mettre à jour l'auto-démarrage si changé
-        if (settings.autoStart !== undefined) {
-          app.setLoginItemSettings({
-            openAtLogin: settings.autoStart,
-            openAsHidden: false
+    if (!savePath.canceled && savePath.filePaths.length > 0) {
+      // Déclencher le téléchargement
+      const { isSocial, platform } = isSocialMediaURL(url)
+      if (isSocial) {
+        try {
+          const downloadPath = savePath.filePaths[0]
+          const tracker: DownloadTracker = {
+            item: null,
+            url: url,
+            startTime: Date.now(),
+            lastBytes: 0,
+            lastTime: Date.now(),
+            savePath: downloadPath,
+            isYouTube: platform === 'YouTube'
+          }
+          activeDownloads.set(url, tracker)
+          await downloadWithYtDlp(url, downloadPath, platform, win)
+        } catch (error: any) {
+          win.webContents.send('download-error', {
+            url,
+            error: error.message || 'Failed to download'
+          })
+        }
+      } else {
+        try {
+          const downloadPath = savePath.filePaths[0]
+          const tracker: DownloadTracker = {
+            item: null,
+            url: url,
+            startTime: Date.now(),
+            lastBytes: 0,
+            lastTime: Date.now(),
+            savePath: downloadPath
+          }
+          activeDownloads.set(url, tracker)
+          await downloadWithMultiThreading(url, downloadPath, win)
+        } catch (error: any) {
+          win.webContents.send('download-error', {
+            url,
+            error: error.message || 'Failed to download'
           })
         }
       }
-      return saved
-    })
-
-    // Handler pour accepter un téléchargement détecté
-    ipcMain.on('accept-detected-download', async (event, url: string) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (!win) return
-
-      // Demander le dossier de destination
-      const savePath = await dialog.showOpenDialog(win, {
-        properties: ['openDirectory'],
-        title: 'Sélectionner le dossier de téléchargement'
-      })
-
-      if (!savePath.canceled && savePath.filePaths.length > 0) {
-        // Déclencher le téléchargement
-        const { isSocial, platform } = isSocialMediaURL(url)
-        if (isSocial) {
-          try {
-            const downloadPath = savePath.filePaths[0]
-            const tracker: DownloadTracker = {
-              item: null,
-              url: url,
-              startTime: Date.now(),
-              lastBytes: 0,
-              lastTime: Date.now(),
-              savePath: downloadPath,
-              isYouTube: platform === 'YouTube'
-            }
-            activeDownloads.set(url, tracker)
-            await downloadWithYtDlp(url, downloadPath, platform, win)
-          } catch (error: any) {
-            win.webContents.send('download-error', {
-              url,
-              error: error.message || 'Failed to download'
-            })
-          }
-        } else {
-          try {
-            const downloadPath = savePath.filePaths[0]
-            const tracker: DownloadTracker = {
-              item: null,
-              url: url,
-              startTime: Date.now(),
-              lastBytes: 0,
-              lastTime: Date.now(),
-              savePath: downloadPath
-            }
-            activeDownloads.set(url, tracker)
-            await downloadWithMultiThreading(url, downloadPath, win)
-          } catch (error: any) {
-            win.webContents.send('download-error', {
-              url,
-              error: error.message || 'Failed to download'
-            })
-          }
-        }
-      }
-    })
-
-    // Handler pour ignorer un téléchargement détecté
-    ipcMain.on('dismiss-detected-download', () => {
-      // Téléchargement ignoré - callback is intentionally empty
-    })
-
-    // Démarrer le serveur HTTP pour communiquer avec l'extension de navigateur
-    startExtensionServer()
-
-    createWindow()
-    console.log('[DEBUG] createWindow() executed')
-
-    // Defer yt-dlp update to after window creation to ensure app starts quickly
-    setTimeout(() => {
-      console.log('[DEBUG] Starting deferred autoUpdateYtDlp()')
-      autoUpdateYtDlp()
-    }, 5000)
-
-    app.on('activate', function () {
-      // On macOS it's common to re-create a window in the app when the
-      // dock icon is clicked and there are no other windows open.
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
-    })
-
-    // [v1.0.8] IPC Handler to get download logs
-    ipcMain.handle('get-download-logs', (_event, url: string) => {
-      const tracker = activeDownloads.get(url)
-      return tracker?.logs || []
-    })
-  })
-
-  // Quit when all windows are closed, except on macOS. There, it's common
-  // for applications and their menu bar to stay active until the user quits
-  // explicitly with Cmd + Q.
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-      app.quit()
     }
   })
+
+  // Handler pour ignorer un téléchargement détecté
+  ipcMain.on('dismiss-detected-download', () => {
+    // Téléchargement ignoré - callback is intentionally empty
+  })
+
+  // Démarrer le serveur HTTP pour communiquer avec l'extension de navigateur
+  startExtensionServer()
+
+  createWindow()
+  console.log('[DEBUG] createWindow() executed')
+
+  // Defer yt-dlp update to after window creation to ensure app starts quickly
+  setTimeout(() => {
+    console.log('[DEBUG] Starting deferred autoUpdateYtDlp()')
+    autoUpdateYtDlp()
+  }, 5000)
+
+  app.on('activate', function () {
+    // On macOS it's common to re-create a window in the app when the
+    // dock icon is clicked and there are no other windows open.
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+
+  // [v1.0.8] IPC Handler to get download logs
+  ipcMain.handle('get-download-logs', (_event, url: string) => {
+    const tracker = activeDownloads.get(url)
+    return tracker?.logs || []
+  })
+})
+
+// Quit when all windows are closed, except on macOS. There, it's common
+// for applications and their menu bar to stay active until the user quits
+// explicitly with Cmd + Q.
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
+})
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
