@@ -1512,14 +1512,14 @@ async function downloadWithYtDlp(
         const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
 
         if (isYouTube) {
-          // YouTube: More flexible format selector to avoid "format not available" errors
-          // Simplified chain with multiple fallbacks
+          // YouTube: SIMPLE format selector to avoid signature-required formats
+          // Prioritize formats that TV client can deliver without complex processing
           downloadArgs.push(
             '-f',
-            'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+            'best[height<=1080]/best',
             '--no-cache-dir'
           )
-          console.log('[yt-dlp] YouTube: Using flexible format selector for maximum compatibility')
+          console.log('[yt-dlp] YouTube: Using simplified format selector (TV-compatible)')
         } else {
           // Other platforms: Use best available video+audio
           downloadArgs.push('-f', 'bestvideo+bestaudio/best')
@@ -1585,11 +1585,19 @@ async function downloadWithYtDlp(
 
           await fsPromises.writeFile(cookieTempPath, netscapeContent)
           cookieFile = cookieTempPath
-          console.log('[yt-dlp] Generated Netscape cookie file for social media authentication')
+          console.log('[yt-dlp] Generated multi-domain Netscape cookie file (.youtube.com + .google.com)')
           downloadArgs.push('--cookies', cookieFile)
         } catch (err) {
           console.error('[yt-dlp] Failed to generate cookie file:', err)
-          // Fallback: try without cookies
+          // Fallback for YouTube: Try extracting cookies directly from Chrome
+          if (url.includes('youtube.com') || url.includes('youtu.be')) {
+            try {
+              console.log('[yt-dlp] Attempting --cookies-from-browser chrome fallback')
+              downloadArgs.push('--cookies-from-browser', 'chrome')
+            } catch (e) {
+              console.warn('[yt-dlp] Chrome cookie extraction unavailable')
+            }
+          }
         }
       } else if (Object.keys(requestHeaders).length > 0 && !isSocialPlatform) {
         // For non-social sites (YouTube, etc.), direct headers work fine
@@ -1599,12 +1607,12 @@ async function downloadWithYtDlp(
         }
       }
 
-      // v25: YouTube client handling - 2025 ULTIMATE COMPATIBILITY
-      // - tv_embedded: bypasses many restrictions and often doesn't need signature
-      // - web: fallback for standard features
+      // v26: YouTube client handling - PURE TV MODE
+      // tv_embedded is the ONLY client that doesn't require signature solving in most cases
+      // It's the most stable option for restricted environments
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        console.log('[yt-dlp] YouTube: Using TV & Web clients (Universal bypass mode)')
-        downloadArgs.push('--extractor-args', 'youtube:player_client=tv_embedded,web')
+        console.log('[yt-dlp] YouTube: PURE TV CLIENT MODE (No signature solving needed)')
+        downloadArgs.push('--extractor-args', 'youtube:player_client=tv_embedded')
       }
 
       console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '))
@@ -2062,7 +2070,7 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.2.0',
+          version: '1.2.1',
           endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )
