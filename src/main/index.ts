@@ -1485,7 +1485,9 @@ async function downloadWithYtDlp(
         url.includes('tiktok.com') ||
         url.includes('instagram.com') ||
         url.includes('facebook.com') ||
-        url.includes('twitter.com')
+        url.includes('twitter.com') ||
+        url.includes('youtube.com') ||
+        url.includes('youtu.be')
 
       if (isSocialPlatform && requestHeaders['Cookie']) {
         try {
@@ -1531,8 +1533,8 @@ async function downloadWithYtDlp(
       // 'mweb' and 'android/ios' now require GVS PO-Tokens.
       // 'web' and 'tv_embedded' are currently the most reliable without tokens.
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        console.log('[yt-dlp] YouTube: Using web,tv_embedded clients (Signature solving optimized)')
-        downloadArgs.push('--extractor-args', 'youtube:player_client=web,tv_embedded')
+        console.log('[yt-dlp] YouTube: Using web,mweb,tv_embedded clients (Signature solving optimized)')
+        downloadArgs.push('--extractor-args', 'youtube:player_client=web,mweb,tv_embedded')
       }
 
       console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '))
@@ -1590,9 +1592,21 @@ async function downloadWithYtDlp(
         }
       }
 
+      // Fallback: Use 'which node' on Unix systems
+      if (!nodeFoundDir && !isWindows) {
+        try {
+          const whichNode = execSync('which node', { encoding: 'utf8' }).trim()
+          if (whichNode && existsSync(whichNode)) {
+            nodeFoundDir = dirname(whichNode)
+          }
+        } catch (e) {
+          // Ignore
+        }
+      }
+
       if (nodeFoundDir) {
         console.log(`[yt-dlp] Found Node.js for signature solving at: ${nodeFoundDir}`)
-        env[pathKey] = `${nodeFoundDir}${process.platform === 'win32' ? ';' : ':'}${env[pathKey]}`
+        env[pathKey] = `${nodeFoundDir}${isWindows ? ';' : ':'}${env[pathKey]}`
       } else {
         console.warn('[yt-dlp] WARNING: Node.js not found in common paths. YouTube "n" challenge may fail.')
       }
@@ -1945,7 +1959,7 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.1.6',
+          version: '1.1.7',
           endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )

@@ -127,32 +127,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: true });
         };
 
-        // Try to fetch cookies for the URL
+        // Try to fetch cookies for the URL - USE URL FIRST (MORE ACCURATE)
         if (typeof chrome !== 'undefined' && chrome.cookies && request.url && (request.url.startsWith('http') || request.url.startsWith('https'))) {
             try {
-                const urlObj = new URL(request.url);
-                chrome.cookies.getAll({ domain: urlObj.hostname }, (cookies) => {
+                chrome.cookies.getAll({ url: request.url }, (cookies) => {
                     if (cookies && cookies.length > 0) {
                         const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-                        console.log(`🍪 Cookies attached for ${urlObj.hostname}`);
+                        console.log(`🍪 Cookies found via URL for: ${request.url.substring(0, 50)}...`);
                         processDownload(cookieString);
                     } else {
-                        chrome.cookies.getAll({ url: request.url }, (cookiesUrl) => {
-                            if (cookiesUrl && cookiesUrl.length > 0) {
-                                const cookieString = cookiesUrl.map(c => `${c.name}=${c.value}`).join('; ');
+                        // Fallback to domain search
+                        const urlObj = new URL(request.url);
+                        chrome.cookies.getAll({ domain: urlObj.hostname.replace('www.', '') }, (domainCookies) => {
+                            if (domainCookies && domainCookies.length > 0) {
+                                const cookieString = domainCookies.map(c => `${c.name}=${c.value}`).join('; ');
+                                console.log(`🍪 Cookies found via Domain fallback: ${urlObj.hostname}`);
                                 processDownload(cookieString);
                             } else {
+                                console.log('⚠️ No cookies found for this URL/Domain');
                                 processDownload();
                             }
                         });
                     }
                 });
-                return true; // Keep message channel open for async response
+                return true; // Keep message channel open
             } catch (e) {
                 console.error('Cookie fetch error:', e);
                 processDownload();
             }
-        } else {
+        }
+        else {
             console.log('⚠️ Cookies API not available or URL not supported');
             processDownload();
         }
