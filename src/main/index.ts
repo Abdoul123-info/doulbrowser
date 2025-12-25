@@ -472,6 +472,68 @@ async function ensureFfmpegAvailable(win?: BrowserWindow): Promise<string | null
   return null
 }
 
+// Helper to ensure Node.js is available for YouTube "n" challenge solving
+async function ensureNodeAvailable(win?: BrowserWindow): Promise<string | null> {
+  const userDataPath = app.getPath('userData')
+  const nodeBinary = process.platform === 'win32' ? 'node.exe' : 'node'
+  const targetPath = join(userDataPath, nodeBinary)
+
+  try {
+    if (existsSync(targetPath)) return targetPath
+  } catch (e) { }
+
+  if (process.platform === 'darwin') {
+    console.log('[Node.js] Not found. Downloading portable Node.js for signature solving...')
+    const downloadUrl = 'https://nodejs.org/dist/v20.10.0/node-v20.10.0-darwin-x64.tar.gz'
+    const tempTarPath = targetPath + '.tar.gz'
+
+    try {
+      const download = async (url: string, dest: string): Promise<any> => {
+        return new Promise((resolve, reject) => {
+          const file = fs.createWriteStream(dest)
+          https.get(url, (response) => {
+            if (response.statusCode === 302 || response.statusCode === 301) {
+              download(response.headers.location!, dest).then(resolve).catch(reject)
+              return
+            }
+            response.pipe(file)
+            file.on('finish', () => {
+              file.close()
+              resolve(true)
+            })
+          }).on('error', (err) => {
+            fs.unlink(dest, () => { })
+            reject(err)
+          })
+        })
+      }
+
+      await download(downloadUrl, tempTarPath)
+      console.log('[Node.js] Downloaded tar.gz, extracting...')
+
+      execSync(`tar -xzf "${tempTarPath}" -C "${userDataPath}" --strip-components 2 "node-v20.10.0-darwin-x64/bin/node"`)
+      fs.unlinkSync(tempTarPath)
+
+      if (fs.existsSync(targetPath)) {
+        fs.chmodSync(targetPath, 0o755)
+        console.log('[Node.js] Portable Node.js installed at:', targetPath)
+
+        if (win) {
+          win.webContents.send('notification', {
+            title: 'Moteur JS installé',
+            body: 'Moteur de signature YouTube prêt'
+          })
+        }
+        return targetPath
+      }
+    } catch (error) {
+      console.error('[Node.js] Auto-download/Extraction failed:', error)
+    }
+  }
+
+  return null
+}
+
 function createWindow(): void {
   console.log('[DEBUG] createWindow() called')
   // Create the browser window.
@@ -1508,8 +1570,10 @@ async function downloadWithYtDlp(
             const [name, ...valueParts] = cookie.split('=')
             const value = valueParts.join('=') // Handle values with '='
             if (name && value) {
+              // Convert domain to .domain.com format for broader compatibility
+              const cookieDomain = domain.startsWith('.') ? domain : `.${domain}`
               // Format: domain, flag, path, secure, expiration, name, value
-              netscapeContent += `${domain}\tTRUE\t/\tFALSE\t${expiration}\t${name}\t${value}\n`
+              netscapeContent += `${cookieDomain}\tTRUE\t/\tFALSE\t${expiration}\t${name}\t${value}\n`
             }
           }
 
@@ -1529,12 +1593,12 @@ async function downloadWithYtDlp(
         }
       }
 
-      // v22: YouTube client handling - 2025 COMPATIBILITY FIX
+      // v23: YouTube client handling - 2025 COMPATIBILITY FIX
       // 'mweb' and 'android/ios' now require GVS PO-Tokens.
-      // 'web' and 'tv_embedded' are currently the most reliable without tokens.
+      // 'web' is currently the most reliable without tokens.
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        console.log('[yt-dlp] YouTube: Using web,mweb,tv_embedded clients (Signature solving optimized)')
-        downloadArgs.push('--extractor-args', 'youtube:player_client=web,mweb,tv_embedded')
+        console.log('[yt-dlp] YouTube: Using web client (Signature solving optimized)')
+        downloadArgs.push('--extractor-args', 'youtube:player_client=web')
       }
 
       console.log(`[yt-dlp] FULL COMMAND ARGS: `, downloadArgs.join(' '))
@@ -1568,10 +1632,12 @@ async function downloadWithYtDlp(
           'C:\\Program Files\\nodejs',
           join(process.resourcesPath, 'node'),
           dirname(process.execPath),
-          join(app.getAppPath(), 'node_modules', '.bin')
+          join(app.getAppPath(), 'node_modules', '.bin'),
+          app.getPath('userData')
         ]
         : isMac
           ? [
+            app.getPath('userData'), // Search in userData FIRST for portable Node
             '/usr/local/bin', // Intel/General
             '/opt/homebrew/bin', // Apple Silicon
             '/usr/bin',
@@ -1581,7 +1647,7 @@ async function downloadWithYtDlp(
             dirname(process.execPath),
             '/Applications/DoulBrowser.app/Contents/MacOS'
           ]
-          : ['/usr/bin', '/usr/local/bin', '/bin']
+          : [app.getPath('userData'), '/usr/bin', '/usr/local/bin', '/bin']
 
       // Find and add Node.js to PATH if found
       let nodeFoundDir = ''
@@ -1612,6 +1678,16 @@ async function downloadWithYtDlp(
       }
 
       env['YTDLP_JS_ENGINE'] = 'node'
+
+      // v23: Ensure portable Node.js is downloaded for Mac if missing
+      if (isMac && !nodeFoundDir) {
+        await ensureNodeAvailable(win)
+        const portableNodePath = join(app.getPath('userData'), nodeBinary)
+        if (existsSync(portableNodePath)) {
+          console.log('[yt-dlp] Using downloaded portable Node.js for signature solving')
+          env[pathKey] = `${app.getPath('userData')}${isMac ? ':' : ';'}${env[pathKey]}`
+        }
+      }
 
       const ytDlpProcess = spawn(finalYtDlpPath, downloadArgs, { env })
 
@@ -1959,7 +2035,7 @@ function startExtensionServer() {
         JSON.stringify({
           status: 'ok',
           app: 'DoulBrowser',
-          version: '1.1.7',
+          version: '1.1.8',
           endpoints: ['/ping', '/download-detected', '/download-status']
         })
       )
