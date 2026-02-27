@@ -17,7 +17,7 @@ $env:SKIP_NOTARIZATION = "true"
 
 # Arrêter les processus qui pourraient bloquer
 Write-Host "Arrêt des processus bloquants..." -ForegroundColor Yellow
-Get-Process | Where-Object {$_.ProcessName -match "electron|download-manager|node|app-builder"} | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process | Where-Object {$_.ProcessName -match "electron|download-manager|node|app-builder|DoulGet|doul-get"} | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
 # Nettoyer le cache et le dossier dist

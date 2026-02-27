@@ -1,4 +1,4 @@
-import { Play, Pause, X, File, FolderOpen, Terminal } from 'lucide-react';
+import { Play, Pause, X, File, FolderOpen, Terminal, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
 import { useState, useEffect, useCallback } from 'react';
 import { AddDownloadModal } from './AddDownloadModal';
@@ -19,6 +19,10 @@ export interface DownloadItem {
     canResume?: boolean;
     createdAt: number;
     strategy?: 'yt-dlp' | 'direct' | 'electron';
+    statusMessage?: string;
+    segments?: number[];
+    isExpanded?: boolean;
+    audioOnly?: boolean; // [v1.7.0] Track format for granular IPC calls
 }
 
 type DownloadListProps = {
@@ -46,11 +50,17 @@ function loadDownloadsFromStorage(): DownloadItem[] {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
             const parsed = JSON.parse(stored);
-            // Filter out cancelled downloads and keep only recent ones (last 30 days)
+            // [v1.2.9] Keep cancelled downloads so they show in "Corbeille" tab
             const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-            return parsed.filter((item: DownloadItem) =>
-                item.status !== 'cancelled' && item.createdAt > thirtyDaysAgo
-            );
+            return parsed
+                .filter((item: DownloadItem) => item.createdAt > thirtyDaysAgo)
+                .map((item: DownloadItem) => {
+                    // Mark active downloads as interrupted/paused on startup until backend resumes them
+                    if (['downloading', 'queued'].includes(item.status)) {
+                        return { ...item, status: 'paused', statusMessage: 'Waiting for resume...' };
+                    }
+                    return item;
+                });
         }
     } catch (error) {
         console.error('Error loading downloads from storage:', error);
@@ -61,9 +71,8 @@ function loadDownloadsFromStorage(): DownloadItem[] {
 function saveDownloadsToStorage(downloads: DownloadItem[]): void {
     try {
         // Save finished, paused, error, and interrupted downloads (but not active ones)
-        const toSave = downloads.filter(item =>
-            ['finished', 'paused', 'error', 'interrupted', 'cancelled'].includes(item.status)
-        );
+        // Save all downloads regardless of status so they reappear on restart
+        const toSave = downloads;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
     } catch (error) {
         console.error('Error saving downloads to storage:', error);
@@ -90,18 +99,31 @@ export function DownloadList({ filter }: DownloadListProps) {
     useEffect(() => {
         const handleProgress = (_event: any, data: any) => {
             setDownloads(prev => prev.map(item => {
-                if (item.url === data.url) {
-                    // Ne pas mettre à jour le pourcentage si le téléchargement est en pause
+                if (item.url === data.url && !!item.audioOnly === !!data.audioOnly) {
                     const newProgress = (item.status === 'paused') ? item.progress : Math.round(data.progress || 0);
+                    // Handle pre-formatted size strings from backend (yt-dlp) or byte numbers
+                    let displaySize = item.size;
+                    if (data.totalBytes) {
+                        displaySize = typeof data.totalBytes === 'number'
+                            ? formatBytes(data.totalBytes)
+                            : data.totalBytes;
+                    }
+
                     return {
                         ...item,
                         progress: newProgress,
-                        size: data.totalBytes ? formatBytes(data.totalBytes) : item.size,
+                        size: displaySize,
                         status: data.state || item.status,
                         name: data.filename || item.name,
-                        speed: data.speed !== undefined ? formatSpeed(data.speed) : item.speed,
+                        // Fix speed display: accept string directly (from yt-dlp) or format number
+                        speed: data.speed !== undefined
+                            ? (typeof data.speed === 'string' ? data.speed : formatSpeed(data.speed))
+                            : item.speed,
                         timeLeft: data.timeLeft || item.timeLeft,
-                        canResume: data.canResume !== undefined ? data.canResume : item.canResume
+                        canResume: data.canResume !== undefined ? data.canResume : item.canResume,
+                        savePath: data.savePath || item.savePath, // [v1.4.6] Capture savePath during progress
+                        segments: data.segmentProgress || item.segments,
+                        statusMessage: data.statusMessage || (data.state === 'finished' ? '' : item.statusMessage)
                     };
                 }
                 return item;
@@ -110,16 +132,19 @@ export function DownloadList({ filter }: DownloadListProps) {
 
         const handleComplete = (_event: any, data: any) => {
             setDownloads(prev => prev.map(item => {
-                if (item.url === data.url) {
+                if (item.url === data.url && !!item.audioOnly === !!data.audioOnly) {
                     const isSuccess = data.state === 'finished' || !data.state;
                     return {
                         ...item,
                         status: isSuccess ? 'finished' :
                             data.state === 'cancelled' ? 'cancelled' : 'error',
                         progress: isSuccess ? 100 : item.progress,
+                        size: data.totalBytes ? formatBytes(data.totalBytes) : item.size,
                         timeLeft: '',
                         speed: '-',
-                        savePath: data.savePath || item.savePath
+                        savePath: data.savePath || item.savePath,
+                        statusMessage: '',
+                        isExpanded: false
                     };
                 }
                 return item;
@@ -128,7 +153,7 @@ export function DownloadList({ filter }: DownloadListProps) {
 
         const handlePaused = (_event: any, data: any) => {
             setDownloads(prev => prev.map(item => {
-                if (item.url === data.url) {
+                if (item.url === data.url && !!item.audioOnly === !!data.audioOnly) {
                     return {
                         ...item,
                         status: 'paused' as const,
@@ -142,7 +167,7 @@ export function DownloadList({ filter }: DownloadListProps) {
 
         const handleResumed = (_event: any, data: any) => {
             setDownloads(prev => prev.map(item => {
-                if (item.url === data.url) {
+                if (item.url === data.url && !!item.audioOnly === !!data.audioOnly) {
                     // Conserver le pourcentage actuel lors de la reprise
                     return {
                         ...item,
@@ -157,7 +182,7 @@ export function DownloadList({ filter }: DownloadListProps) {
 
         const handleCancelled = (_event: any, data: any) => {
             setDownloads(prev => prev.map(item => {
-                if (item.url === data.url) {
+                if (item.url === data.url && !!item.audioOnly === !!data.audioOnly) {
                     return { ...item, status: 'cancelled' as const };
                 }
                 return item;
@@ -166,7 +191,9 @@ export function DownloadList({ filter }: DownloadListProps) {
 
         const handleError = (_event: any, data: any) => {
             setDownloads(prev => prev.map(item => {
-                if (item.url === data.url || (data.originalUrl && item.url === data.originalUrl)) {
+                const urlMatch = item.url === data.url || (data.originalUrl && item.url === data.originalUrl);
+                const formatMatch = !!item.audioOnly === !!data.audioOnly;
+                if (urlMatch && formatMatch) {
                     return {
                         ...item,
                         status: 'error' as const,
@@ -179,8 +206,9 @@ export function DownloadList({ filter }: DownloadListProps) {
 
         const handleStarted = (_event: any, data: any) => {
             setDownloads(prev => {
-                // Check if already exists in active state
-                if (prev.find(item => item.url === data.url && ['queued', 'downloading', 'paused'].includes(item.status))) {
+                // Check if already exists in active state - [v1.7.0] Format-aware check
+                if (prev.find(item => item.url === data.url && !!item.audioOnly === !!data.audioOnly && ['queued', 'downloading', 'paused'].includes(item.status))) {
+                    console.log('[DEBUG] Download already exists in UI:', data.url, 'AudioOnly:', data.audioOnly);
                     return prev;
                 }
 
@@ -193,6 +221,7 @@ export function DownloadList({ filter }: DownloadListProps) {
                     status: (data.status as any) || 'queued',
                     timeLeft: data.timeLeft || '--',
                     url: data.url,
+                    audioOnly: !!data.audioOnly, // [v1.7.0] Store format
                     createdAt: data.createdAt || Date.now(),
                     savePath: data.savePath
                 };
@@ -239,9 +268,16 @@ export function DownloadList({ filter }: DownloadListProps) {
         }
     };
 
-    const handleAddDownload = useCallback(async (url: string) => {
-        // Check if download already exists
+    const toggleExpand = (id: string) => {
+        setDownloads(prev => prev.map(item =>
+            item.id === id ? { ...item, isExpanded: !item.isExpanded } : item
+        ));
+    };
+
+    const handleAddDownload = useCallback(async (url: string, audioOnly: boolean = false) => {
+        // ... existence check omitted for brevity ...
         const exists = downloads.find(d => d.url === url &&
+            !!d.audioOnly === audioOnly &&
             ['downloading', 'queued', 'paused'].includes(d.status));
 
         if (exists) {
@@ -254,7 +290,7 @@ export function DownloadList({ filter }: DownloadListProps) {
 
         const newDownload: DownloadItem = {
             id: uuidv4(),
-            name: url.split('/').pop() || 'unknown-file',
+            name: (url.split('/').pop() || 'unknown-file') + (audioOnly ? '.mp3' : ''),
             size: t.downloadList.waiting,
             progress: 0,
             speed: '-',
@@ -262,20 +298,39 @@ export function DownloadList({ filter }: DownloadListProps) {
             url,
             timeLeft: '--',
             createdAt: Date.now(),
-            strategy: 'yt-dlp'
+            strategy: 'yt-dlp',
+            audioOnly, // [v1.7.0] Store format
+            savePath: savePath || undefined // [v1.4.7] Store savePath immediately
         };
 
         setDownloads(prev => [newDownload, ...prev]);
-        window.api.startDownload(url, savePath || undefined);
+        window.api.startDownload(url, savePath || undefined, audioOnly);
     }, [downloads]);
 
     const handlePause = useCallback((url: string) => {
         window.api.pauseDownload(url);
     }, []);
 
-    const handleResume = useCallback((url: string) => {
+    const handleResume = useCallback(async (url: string) => {
         const item = downloads.find(d => d.url === url);
-        window.api.resumeDownload(url, item?.savePath, item?.name);
+        let savePath = item?.savePath;
+
+        // [v1.4.7] Fallback: If savePath is missing, ask the user to select the folder
+        if (!savePath) {
+            console.log('[Resume] SavePath missing in localStorage, asking user...');
+            savePath = await window.api.selectDownloadPath() || undefined;
+
+            if (savePath) {
+                // Update local status so the path is saved for next time
+                setDownloads(prev => prev.map(d =>
+                    d.url === url ? { ...d, savePath } : d
+                ));
+            } else {
+                return; // User cancelled folder selection
+            }
+        }
+
+        window.api.resumeDownload(url, savePath, item?.name);
     }, [downloads]);
 
     const handleCancel = useCallback((url: string) => {
@@ -285,31 +340,58 @@ export function DownloadList({ filter }: DownloadListProps) {
     }, [t]);
 
     const handleOpenFolder = useCallback((url: string) => {
-        window.api.openDownloadFolder(url);
-    }, []);
+        const item = downloads.find(d => d.url === url);
+        window.api.openDownloadFolder(url, item?.savePath, item?.name);
+    }, [downloads]);
 
     const handleDelete = useCallback((id: string) => {
         if (confirm(t.downloadList.deleteConfirm)) {
+            const itemToDelete = downloads.find(d => d.id === id);
+            if (!itemToDelete) return;
+
+            // [v1.2.9] Soft Delete Flow: If not already cancelled, move to Trash
+            if (itemToDelete.status !== 'cancelled') {
+                // [v1.3.0] CHANGE: Do NOT move file to system Recycle Bin yet.
+                // Just change status so it appears in the "Corbeille" tab.
+                setDownloads(prev => prev.map(item =>
+                    item.id === id ? { ...item, status: 'cancelled' as const } : item
+                ));
+                return;
+            }
+
+            // [v1.3.0] Permanent Delete Flow: If already in Trash, perform PHYSICAL DELETE and remove from state
+            if (itemToDelete.savePath) {
+                window.api.deleteFile(itemToDelete.savePath, itemToDelete.name);
+            }
+
             setDownloads(prev => {
                 const updated = prev.filter(item => item.id !== id);
                 // Sauvegarder immédiatement pour éviter que l'élément revienne
                 try {
-                    const toSave = updated.filter(item =>
-                        ['finished', 'paused', 'error', 'interrupted', 'cancelled'].includes(item.status)
-                    );
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
                 } catch (error) {
                     console.error('Error saving downloads to storage:', error);
                 }
                 return updated;
             });
         }
-    }, [t]);
+    }, [t, downloads]);
+
+    const handleRestore = useCallback((id: string) => {
+        setDownloads(prev => prev.map(item => {
+            if (item.id === id && item.status === 'cancelled') {
+                // Determine restored status based on progress
+                const restoredStatus = item.progress >= 100 ? 'finished' : 'paused';
+                return { ...item, status: restoredStatus as any };
+            }
+            return item;
+        }));
+    }, []);
 
     const handleResumeAll = useCallback(() => {
         downloads.forEach(item => {
             if ((['paused', 'interrupted', 'error'].includes(item.status)) && item.canResume !== false && item.url) {
-                window.api.resumeDownload(item.url, item.savePath, item.name);
+                window.api.resumeDownload(item.url, item.savePath, item.name, !!item.audioOnly);
             }
         });
     }, [downloads]);
@@ -317,7 +399,7 @@ export function DownloadList({ filter }: DownloadListProps) {
     const handleStopAll = useCallback(() => {
         downloads.forEach(item => {
             if ((['downloading', 'queued'].includes(item.status)) && item.url) {
-                window.api.pauseDownload(item.url);
+                window.api.pauseDownload(item.url, !!item.audioOnly);
             }
         });
     }, [downloads]);
@@ -325,7 +407,7 @@ export function DownloadList({ filter }: DownloadListProps) {
     const handleResumeSelected = useCallback(() => {
         downloads.forEach(item => {
             if (selectedIds.has(item.id) && (['paused', 'interrupted', 'error'].includes(item.status)) && item.canResume !== false && item.url) {
-                window.api.resumeDownload(item.url, item.savePath, item.name);
+                window.api.resumeDownload(item.url, item.savePath, item.name, !!item.audioOnly);
             }
         });
         setSelectedIds(new Set());
@@ -334,7 +416,7 @@ export function DownloadList({ filter }: DownloadListProps) {
     const handleStopSelected = useCallback(() => {
         downloads.forEach(item => {
             if (selectedIds.has(item.id) && (['downloading', 'queued'].includes(item.status)) && item.url) {
-                window.api.pauseDownload(item.url);
+                window.api.pauseDownload(item.url, !!item.audioOnly);
             }
         });
         setSelectedIds(new Set());
@@ -345,20 +427,29 @@ export function DownloadList({ filter }: DownloadListProps) {
 
         const idsToDelete = new Set(selectedIds);
 
-        // Cancel any active ones first
-        downloads.forEach(item => {
-            if (idsToDelete.has(item.id) && ['downloading', 'queued', 'paused'].includes(item.status) && item.url) {
-                window.api.cancelDownload(item.url);
-            }
-        });
-
         setDownloads(prev => {
-            const updated = prev.filter(item => !idsToDelete.has(item.id));
+            const updated = prev.map(item => {
+                if (idsToDelete.has(item.id)) {
+                    // Soft delete: move to trash if not already there
+                    if (item.status !== 'cancelled') {
+                        // Cancel if active
+                        if (['downloading', 'queued', 'paused'].includes(item.status) && item.url) {
+                            window.api.cancelDownload(item.url, !!item.audioOnly);
+                        }
+                        // [v1.3.0] CHANGE: Do NOT call deleteFile yet during soft delete
+                        return { ...item, status: 'cancelled' as const };
+                    }
+                    // [v1.3.0] Permanent removal: PERFORM PHYSICAL DELETE if in Trash
+                    if (item.savePath) {
+                        window.api.deleteFile(item.savePath, item.name);
+                    }
+                    return null;
+                }
+                return item;
+            }).filter((item): item is DownloadItem => item !== null);
+
             try {
-                const toSave = updated.filter(item =>
-                    ['finished', 'paused', 'error', 'interrupted', 'cancelled'].includes(item.status)
-                );
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
             } catch (error) {
                 console.error('Error saving downloads to storage:', error);
             }
@@ -366,6 +457,17 @@ export function DownloadList({ filter }: DownloadListProps) {
         });
         setSelectedIds(new Set());
     }, [downloads, selectedIds, t]);
+
+    const handleRestoreSelected = useCallback(() => {
+        setDownloads(prev => prev.map(item => {
+            if (selectedIds.has(item.id) && item.status === 'cancelled') {
+                const restoredStatus = item.progress >= 100 ? 'finished' : 'paused';
+                return { ...item, status: restoredStatus as any };
+            }
+            return item;
+        }));
+        setSelectedIds(new Set());
+    }, [selectedIds]);
 
     return (
         <div className="flex-1 bg-background flex flex-col h-screen overflow-hidden">
@@ -396,6 +498,11 @@ export function DownloadList({ filter }: DownloadListProps) {
                             <button onClick={handleStopSelected} className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-xs font-medium flex items-center gap-1">
                                 <Pause className="w-3 h-3" /> {t.downloadList.stopSelected}
                             </button>
+                            {filter === 'trash' && (
+                                <button onClick={handleRestoreSelected} className="px-3 py-1.5 bg-green-500/10 text-green-600 hover:bg-green-500/20 rounded text-xs font-medium flex items-center gap-1">
+                                    <RotateCcw className="w-3 h-3" /> {t.downloadList.restoreSelected}
+                                </button>
+                            )}
                             <button onClick={handleDeleteSelected} className="px-3 py-1.5 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded text-xs font-medium flex items-center gap-1">
                                 <X className="w-3 h-3" /> {t.downloadList.deleteSelected}
                             </button>
@@ -426,12 +533,12 @@ export function DownloadList({ filter }: DownloadListProps) {
                                         onChange={toggleSelectAll}
                                     />
                                 </th>
-                                <th className="px-6 py-3 font-medium">{t.downloadList.fileName}</th>
-                                <th className="px-6 py-3 font-medium">{t.downloadList.size}</th>
-                                <th className="px-6 py-3 font-medium">{t.downloadList.progress}</th>
-                                <th className="px-6 py-3 font-medium">{t.downloadList.speed}</th>
-                                <th className="px-6 py-3 font-medium">{t.downloadList.status}</th>
-                                <th className="px-6 py-3 font-medium text-right">{t.downloadList.actions}</th>
+                                <th className="px-6 py-3 font-medium min-w-[300px] w-auto">{t.downloadList.fileName}</th>
+                                <th className="px-6 py-3 font-medium w-32">{t.downloadList.size}</th>
+                                <th className="px-6 py-3 font-medium w-60">{t.downloadList.progress}</th>
+                                <th className="px-6 py-3 font-medium w-32">{t.downloadList.speed}</th>
+                                <th className="px-6 py-3 font-medium w-32">{t.downloadList.status}</th>
+                                <th className="px-6 py-3 font-medium text-right w-32">{t.downloadList.actions}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -445,22 +552,33 @@ export function DownloadList({ filter }: DownloadListProps) {
                                             onChange={() => toggleSelection(item.id)}
                                         />
                                     </td>
-                                    <td className="px-6 py-4 font-medium flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded bg-secondary flex items-center justify-center text-muted-foreground">
+                                    <td className="px-6 py-4 font-medium flex items-center gap-3 min-w-[200px]">
+                                        <div className="w-8 h-8 rounded bg-secondary flex items-center justify-center text-muted-foreground shrink-0">
                                             <File className="w-4 h-4" />
                                         </div>
                                         <div className="truncate max-w-[400px]" title={item.name}>
                                             {item.name}
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-muted-foreground">{item.size}</td>
-                                    <td className="px-6 py-4 w-64">
+                                    <td className="px-6 py-4 text-muted-foreground w-28 tabular-nums">{item.size}</td>
+                                    <td className="px-6 py-4 w-48">
                                         <div className="flex flex-col gap-1">
-                                            <div className="flex justify-between text-xs text-muted-foreground">
-                                                <span>{item.progress}%</span>
+                                            <div className="flex justify-between items-center text-xs text-muted-foreground">
+                                                <div className="flex items-center gap-1">
+                                                    <span>{item.progress}%</span>
+                                                    {item.segments && item.segments.length > 0 && (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); toggleExpand(item.id); }}
+                                                            className="p-0.5 hover:bg-secondary rounded transition-colors"
+                                                            title="Toggle details"
+                                                        >
+                                                            {item.isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                                        </button>
+                                                    )}
+                                                </div>
                                                 <span>{item.timeLeft || '--'}</span>
                                             </div>
-                                            <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+                                            <div className="h-2 w-full bg-secondary rounded-full overflow-hidden relative">
                                                 <div
                                                     className={clsx("h-full rounded-full transition-all duration-500",
                                                         item.status === 'finished' ? "bg-green-500" :
@@ -472,10 +590,35 @@ export function DownloadList({ filter }: DownloadListProps) {
                                                     style={{ width: `${item.progress}%` }}
                                                 />
                                             </div>
+
+                                            {/* Status Message (Post-processing feedback) */}
+                                            {item.statusMessage && (
+                                                <div className="text-[10px] text-blue-500 font-medium animate-pulse mt-0.5 truncate">
+                                                    {item.statusMessage}
+                                                </div>
+                                            )}
+
+                                            {/* Collapsible Segment Bars (Sub-progress) */}
+                                            {item.isExpanded && item.segments && item.segments.length > 0 && (
+                                                <div className="flex gap-1 mt-1.5 h-1.5 w-full">
+                                                    {item.segments.map((segProgress, idx) => (
+                                                        <div
+                                                            key={idx}
+                                                            className="flex-1 h-full bg-secondary/30 rounded-full overflow-hidden"
+                                                            title={`Thread ${idx + 1}: ${segProgress}%`}
+                                                        >
+                                                            <div
+                                                                className="h-full bg-blue-500/80 transition-all duration-300"
+                                                                style={{ width: `${segProgress}%` }}
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-muted-foreground">{item.speed}</td>
-                                    <td className="px-6 py-4">
+                                    <td className="px-6 py-4 text-muted-foreground w-28 tabular-nums">{item.speed}</td>
+                                    <td className="px-6 py-4 w-28">
                                         <span className={clsx("px-2.5 py-0.5 rounded-full text-xs font-medium capitalize",
                                             item.status === 'finished' ? "bg-green-500/10 text-green-500" :
                                                 item.status === 'downloading' ? "bg-blue-500/10 text-blue-500" :
@@ -487,8 +630,8 @@ export function DownloadList({ filter }: DownloadListProps) {
                                             {t.status[item.status as keyof typeof t.status] || item.status}
                                         </span>
                                     </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <td className="px-6 py-4 text-right w-28">
+                                        <div className="flex items-center justify-end gap-2 text-muted-foreground">
                                             {(item.status === 'downloading' || item.status === 'queued') && item.canResume !== false && (
                                                 <button
                                                     onClick={() => item.url && handlePause(item.url)}
@@ -526,6 +669,15 @@ export function DownloadList({ filter }: DownloadListProps) {
                                                     <FolderOpen className="w-4 h-4" />
                                                 </button>
                                             )}
+                                            {item.status === 'cancelled' && (
+                                                <button
+                                                    onClick={() => handleRestore(item.id)}
+                                                    className="p-1.5 hover:bg-green-500/10 rounded-md text-muted-foreground hover:text-green-500 transition-colors"
+                                                    title={t.downloadList.restore}
+                                                >
+                                                    <RotateCcw className="w-4 h-4" />
+                                                </button>
+                                            )}
                                             {(item.status === 'finished' || item.status === 'error' || item.status === 'cancelled' || item.status === 'interrupted') && (
                                                 <button
                                                     onClick={() => handleDelete(item.id)}
@@ -556,7 +708,7 @@ export function DownloadList({ filter }: DownloadListProps) {
                         </div>
                     )}
                 </div>
-            </div>
+            </div >
 
             <AddDownloadModal
                 isOpen={isModalOpen}
@@ -570,6 +722,6 @@ export function DownloadList({ filter }: DownloadListProps) {
                 url={logModalItem?.url || ''}
                 filename={logModalItem?.name || ''}
             />
-        </div>
+        </div >
     );
 }

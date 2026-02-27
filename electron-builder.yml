@@ -1,5 +1,5 @@
-appId: com.doulbrowser.app
-productName: DoulBrowser
+appId: com.doulget.app
+productName: DoulGet
 copyright: Copyright © 2024-2025 Oumarou Abdoul Jabbar
 directories:
   buildResources: build
@@ -22,7 +22,7 @@ asarUnpack:
   - ffmpeg.exe
   - extension_clean/**
 win:
-  executableName: DoulBrowser
+  executableName: DoulGet
   icon: build/icon.ico
   sign: null
   verifyUpdateCodeSignature: false

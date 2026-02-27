@@ -1,4 +1,4 @@
-import { X, Settings, HelpCircle, Globe, FolderOpen, Download, Bell, Power, RotateCcw } from 'lucide-react';
+import { X, Settings, HelpCircle, Globe, FolderOpen, Download, Bell, Power, RotateCcw, Key, ShieldCheck, Info } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useTranslation, Language } from '../utils/i18n';
 
@@ -15,6 +15,10 @@ interface AppSettings {
     notifications: boolean;
     soundNotifications: boolean;
     language: string;
+    isActivated: boolean;
+    expiryDate: string | null;
+    machineId: string;
+    licenseKey: string;
 }
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
@@ -28,10 +32,54 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         autoStart: false,
         notifications: true,
         soundNotifications: false,
-        language: 'fr'
+        language: 'fr',
+        isActivated: false,
+        expiryDate: null,
+        machineId: '',
+        licenseKey: ''
     });
+    const [licenseInput, setLicenseInput] = useState('');
+    const [activationMessage, setActivationMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+
+    // [v1.9.21] Secret admin reset
+    const [secretClicks, setSecretClicks] = useState(0);
+    const [showResetPrompt, setShowResetPrompt] = useState(false);
+    const [resetPassword, setResetPassword] = useState('');
+    const [resetMessage, setResetMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+    const handleSecretClick = () => {
+        const newCount = secretClicks + 1;
+        setSecretClicks(newCount);
+        if (newCount >= 5) {
+            setShowResetPrompt(true);
+            setSecretClicks(0);
+            setResetPassword('');
+            setResetMessage(null);
+        }
+        // Auto-reset counter after 2 seconds of inactivity
+        setTimeout(() => setSecretClicks(0), 2000);
+    };
+
+    const handleResetLicense = async () => {
+        if (!resetPassword.trim()) return;
+        try {
+            const result = await window.api.adminResetLicense(resetPassword.trim());
+            if (result.success) {
+                setResetMessage({ type: 'success', text: 'Licence réinitialisée avec succès.' });
+                await loadSettings();
+                setTimeout(() => {
+                    setShowResetPrompt(false);
+                    setResetMessage(null);
+                }, 1500);
+            } else {
+                setResetMessage({ type: 'error', text: result.error || 'Échec.' });
+            }
+        } catch (_e) {
+            setResetMessage({ type: 'error', text: 'Erreur interne.' });
+        }
+    };
 
     useEffect(() => {
         if (isOpen) {
@@ -75,6 +123,22 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         }
     };
 
+    const handleActivate = async () => {
+        if (!licenseInput.trim()) return;
+
+        try {
+            const result = await window.api.activateLicense(licenseInput.trim());
+            if (result.success) {
+                setActivationMessage({ type: 'success', text: `Activé avec succès ! Expire le : ${result.expiry}` });
+                await loadSettings();
+            } else {
+                setActivationMessage({ type: 'error', text: result.error || 'Clé invalide.' });
+            }
+        } catch (error) {
+            setActivationMessage({ type: 'error', text: 'Erreur lors de l\'activation.' });
+        }
+    };
+
     const selectDownloadPath = async () => {
         try {
             const path = await window.api.selectDownloadPath();
@@ -110,8 +174,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         <Settings className="w-5 h-5 text-blue-500" />
                         {t.settings.title}
                     </h3>
-                    <button 
-                        onClick={onClose} 
+                    <button
+                        onClick={onClose}
                         className="text-muted-foreground hover:text-foreground transition-colors"
                     >
                         <X className="w-5 h-5" />
@@ -277,6 +341,186 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 <p className="text-xs text-muted-foreground">
                                     {t.settings.languageNote}
                                 </p>
+                            </div>
+                        </div>
+
+                        {/* Section Activation & Licence [v1.6.9] */}
+                        <div className="border border-border rounded-lg p-4 bg-blue-500/5">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-3">
+                                    <ShieldCheck className={`w-5 h-5 ${settings.isActivated ? 'text-green-500' : 'text-blue-500'}`} />
+                                    <h4 className="font-semibold text-foreground">Activation & Licence</h4>
+                                </div>
+                                {settings.isActivated && (
+                                    <span className="px-2 py-1 bg-green-500/20 text-green-500 text-xs font-bold rounded uppercase tracking-wider">
+                                        Activé
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="space-y-4">
+                                {/* Machine ID Display */}
+                                <div className="bg-secondary/50 rounded-md p-3 border border-border/50">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                                        <span
+                                            className="text-xs font-medium text-muted-foreground uppercase tracking-tight cursor-default select-none"
+                                            onClick={handleSecretClick}
+                                        >Identifiant Machine (HWID)</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <code className="text-sm font-mono text-blue-400 select-all">{settings.machineId || 'Récupération...'}</code>
+                                        <div className="flex gap-3">
+                                            <button
+                                                onClick={() => {
+                                                    const info = `Support DoulGet\n---\nHWID: ${settings.machineId}\nVersion: 1.9.29\nStatus: ${settings.isActivated ? 'Activé' : 'Non activé'}`;
+                                                    navigator.clipboard.writeText(info);
+                                                    setActivationMessage({ text: 'Infos techniques copiées !', type: 'success' });
+                                                    setTimeout(() => setActivationMessage(null), 3000);
+                                                }}
+                                                className="text-[10px] text-muted-foreground hover:text-blue-500 font-medium transition-colors uppercase"
+                                                title="Copier les informations pour le support technique"
+                                            >
+                                                Infos Support
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(settings.machineId);
+                                                    setActivationMessage({ text: 'HWID copié !', type: 'success' });
+                                                    setTimeout(() => setActivationMessage(null), 3000);
+                                                }}
+                                                className="text-[10px] text-muted-foreground hover:text-blue-500 font-medium transition-colors uppercase"
+                                            >
+                                                Copier HWID
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                                {!settings.isActivated ? (
+                                    <div className="space-y-3">
+                                        <div className="flex gap-2">
+                                            <div className="relative flex-1">
+                                                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                                <input
+                                                    type="text"
+                                                    placeholder="xxxx-xxxx-xxxx-xxxx"
+                                                    value={licenseInput}
+                                                    onChange={(e) => setLicenseInput(e.target.value)}
+                                                    className="w-full pl-9 pr-3 py-2 bg-secondary/80 text-foreground border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                                />
+                                            </div>
+                                            <button
+                                                onClick={handleActivate}
+                                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-all active:scale-95 whitespace-nowrap"
+                                            >
+                                                Activer
+                                            </button>
+                                        </div>
+                                        {activationMessage && (
+                                            <p className={`text-xs ${activationMessage.type === 'success' ? 'text-green-500' : 'text-red-500'} animate-in fade-in slide-in-from-top-1`}>
+                                                {activationMessage.text}
+                                            </p>
+                                        )}
+                                        <p className="text-[10px] text-muted-foreground italic leading-relaxed">
+                                            Veuillez entrer votre clé de licence reçue lors de votre test ou achat.
+                                            L'identifiant machine ci-dessus est requis pour générer une clé valide.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-muted-foreground font-medium">Statut :</span>
+                                            <span className="text-green-500 font-bold">Produit Activé</span>
+                                        </div>
+
+                                        {/* [v1.9.20] Expiration avec date + heure + countdown */}
+                                        <div className="bg-secondary/50 rounded-md p-3 border border-border/50">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <Key className="w-3.5 h-3.5 text-muted-foreground" />
+                                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-tight">Date d'expiration</span>
+                                            </div>
+                                            {(() => {
+                                                const raw = settings.expiryDate;
+                                                if (!raw) return <span className="text-foreground text-sm">N/A</span>;
+                                                const expiryMs = new Date(raw).getTime();
+                                                const nowMs = Date.now();
+                                                const diffMs = expiryMs - nowMs;
+                                                const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                                                const totalHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                                                const isExpired = diffMs <= 0;
+                                                const urgencyColor = isExpired ? 'text-red-500' : totalDays < 7 ? 'text-orange-500' : totalDays < 30 ? 'text-yellow-500' : 'text-green-500';
+                                                const urgencyBg = isExpired ? 'bg-red-500/10 border-red-500/30' : totalDays < 7 ? 'bg-orange-500/10 border-orange-500/30' : totalDays < 30 ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-green-500/10 border-green-500/30';
+
+                                                // Format: "25 février 2026 à 14:30"
+                                                const formatted = new Date(raw).toLocaleDateString('fr-FR', {
+                                                    day: 'numeric',
+                                                    month: 'long',
+                                                    year: 'numeric',
+                                                    hour: '2-digit',
+                                                    minute: '2-digit'
+                                                });
+
+                                                return (
+                                                    <div className="space-y-2">
+                                                        <div className="text-foreground text-sm font-semibold">{formatted}</div>
+                                                        <div className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-md border text-xs font-bold ${urgencyBg} ${urgencyColor}`}>
+                                                            {isExpired
+                                                                ? '⚠️ Licence expirée'
+                                                                : `⏳ ${totalDays}j ${totalHours}h restant${totalDays > 1 ? 's' : ''}`
+                                                            }
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-muted-foreground font-medium">Clé utilisée :</span>
+                                            <span className="text-muted-foreground font-mono">
+                                                {(settings.licenseKey || '').substring(0, 10)}****************
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* [v1.9.21] Secret Admin Reset Modal */}
+                                {showResetPrompt && (
+                                    <div className="mt-4 bg-red-500/5 border border-red-500/20 rounded-lg p-4 animate-in fade-in duration-200">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Key className="w-4 h-4 text-red-400" />
+                                            <span className="text-sm font-semibold text-red-400">Admin Reset</span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="password"
+                                                placeholder="Mot de passe admin"
+                                                value={resetPassword}
+                                                onChange={(e) => setResetPassword(e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleResetLicense()}
+                                                className="flex-1 px-3 py-2 bg-secondary/80 text-foreground border border-red-500/30 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500/50 text-sm"
+                                            />
+                                            <button
+                                                onClick={handleResetLicense}
+                                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-all active:scale-95 text-sm whitespace-nowrap"
+                                            >
+                                                Réinitialiser
+                                            </button>
+                                            <button
+                                                onClick={() => setShowResetPrompt(false)}
+                                                className="px-3 py-2 text-muted-foreground hover:text-foreground transition-colors text-sm"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                        {resetMessage && (
+                                            <p className={`text-xs mt-2 ${resetMessage.type === 'success' ? 'text-green-500' : 'text-red-500'}`}>
+                                                {resetMessage.text}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
 

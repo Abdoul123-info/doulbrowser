@@ -1,14 +1,14 @@
 {
-  "name": "doul-browser",
-  "version": "1.2.5",
-  "description": "DoulBrowser - Gestionnaire de téléchargements avancé",
+  "name": "doul-get",
+  "version": "1.2.8",
+  "description": "DoulGet - Gestionnaire de téléchargements avancé",
   "main": "./out/main/index.js",
   "author": {
     "name": "Oumarou Abdoul Jabbar",
     "email": "oumarouabdoul811@gmail.com",
     "country": "Niger"
   },
-  "homepage": "https://doulbrowser.com",
+  "homepage": "https://doulget.com",
   "license": "MIT",
   "copyright": "Copyright © 2024-2025 Oumarou Abdoul Jabbar",
   "scripts": {
@@ -52,21 +52,23 @@
     "@vitejs/plugin-react": "^5.0.3",
     "autoprefixer": "^10.4.22",
     "canvas": "^3.2.0",
-    "electron": "^37.0.0",
+    "electron": "33.2.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^4.0.1",
     "eslint": "^9.36.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
+    "javascript-obfuscator": "^5.3.0",
     "png-to-ico": "^2.1.8",
     "postcss": "^8.5.6",
     "prettier": "^3.6.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "rollup-plugin-javascript-obfuscator": "^1.0.4",
     "sharp": "^0.33.5",
     "tailwindcss": "^3.4.18",
     "typescript": "^5.9.2",
-    "vite": "^7.1.6"
+    "vite": "^5.4.11"
   }
 }

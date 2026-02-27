@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guide d'Utilisation Complet - DoulGet</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+
+        :root {
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #60a5fa;
+            --border: #334155;
+            --success: #10b981;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 60px;
+            padding: 60px 40px;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border-radius: 30px;
+            border: 1px solid var(--border);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .logo-text {
+            font-size: 4rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            background: linear-gradient(to right, #60a5fa, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+        }
+
+        .subtitle {
+            font-size: 1.4rem;
+            color: var(--text-muted);
+            font-weight: 300;
+        }
+
+        nav {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+
+        nav a {
+            color: var(--accent);
+            text-decoration: none;
+            padding: 8px 16px;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        nav a:hover {
+            background: var(--primary);
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        section {
+            margin-bottom: 100px;
+            background: var(--card-bg);
+            padding: 50px;
+            border-radius: 24px;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+
+        h2 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            color: white;
+        }
+
+        h2 span {
+            background: var(--primary);
+            color: white;
+            width: 40px;
+            height: 40px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            margin-right: 20px;
+            font-size: 1.4rem;
+            flex-shrink: 0;
+        }
+
+        p {
+            margin-bottom: 25px;
+            font-size: 1.15rem;
+            color: #cbd5e1;
+        }
+
+        .step-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 40px;
+            margin-top: 30px;
+        }
+
+        .step-item {
+            background: rgba(15, 23, 42, 0.5);
+            padding: 30px;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .step-item h3 {
+            font-size: 1.4rem;
+            margin-bottom: 15px;
+            color: var(--accent);
+        }
+
+        .image-container {
+            margin: 20px 0;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 2px solid var(--border);
+            box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.4);
+            background: #000;
+        }
+
+        img {
+            width: 100%;
+            display: block;
+            transition: all 0.5s ease;
+        }
+
+        img:hover {
+            transform: scale(1.02);
+        }
+
+        ul {
+            list-style: none;
+            margin-bottom: 20px;
+        }
+
+        li {
+            margin-bottom: 15px;
+            padding-left: 32px;
+            position: relative;
+            color: #e2e8f0;
+            font-size: 1.1rem;
+        }
+
+        li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: var(--success);
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+
+        .highlight {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .note {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid var(--primary);
+            padding: 25px;
+            border-radius: 12px;
+            margin: 30px 0;
+            color: #93c5fd;
+            font-size: 1.1rem;
+            display: flex;
+            gap: 15px;
+            align-items: flex-start;
+        }
+
+        .note::before {
+            content: "💡";
+            font-size: 1.5rem;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 80px;
+            padding-bottom: 40px;
+            color: var(--text-muted);
+            font-size: 1rem;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .badge-new {
+            background: var(--success);
+            color: white;
+        }
+
+        @media screen and (min-width: 768px) {
+            .step-grid-2col {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media print {
+            body {
+                background: white;
+                color: black;
+                padding: 0;
+            }
+
+            section {
+                page-break-inside: avoid;
+                border: 1px solid #eee;
+                box-shadow: none;
+                background: white;
+                color: black;
+                padding: 30px;
+                margin-bottom: 40px;
+            }
+
+            h1,
+            h2,
+            h3 {
+                color: #1e3a8a;
+                -webkit-text-fill-color: initial;
+            }
+
+            p,
+            li {
+                color: #1f2937;
+            }
+
+            nav {
+                display: none;
+            }
+
+            .container {
+                max-width: 100%;
+            }
+
+            .image-container {
+                border: 1px solid #ddd;
+            }
+
+            .note {
+                background: #f0f7ff;
+                color: #1e40af;
+                border-color: #3b82f6;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-text">DoulGet</div>
+            <p class="subtitle">Guide Complet d'Installation et d'Utilisation</p>
+            <nav>
+                <a href="#activation">Activation</a>
+                <a href="#extension">Installation Extension</a>
+                <a href="#youtube">Utilisation YouTube</a>
+                <a href="#parametres">Paramètres</a>
+            </nav>
+        </header>
+
+        <!-- SECTION 1: ACTIVATION -->
+        <section id="activation">
+            <h2><span>1</span> Activation de votre Licence</h2>
+            <p>DoulGet nécessite une licence valide pour fonctionner sur votre ordinateur. Suivez ces étapes simples
+                pour activer votre copie.</p>
+
+            <div class="step-grid">
+                <div class="step-item">
+                    <h3>Récupérer votre identifiant (HWID)</h3>
+                    <div class="image-container">
+                        <img src="capture/Licence.png" alt="Ecran de licence">
+                    </div>
+                    <ul>
+                        <li>Ouvrez l'application DoulGet.</li>
+                        <li>Copiez le code <span class="highlight">HWID</span> affiché dans le rectangle bleu.</li>
+                        <li>Envoyez-le à votre revendeur pour obtenir votre clé de licence.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 2: EXTENSION -->
+        <section id="extension">
+            <h2><span>2</span> Installation de l'Extension Chrome</h2>
+            <p>L'extension est le cerveau de DoulGet. Elle permet de détecter automatiquement les boutons de
+                téléchargement sur vos sites préférés.</p>
+
+            <div class="step-grid">
+                <div class="step-item">
+                    <h3>Étape A : Activer le mode développeur</h3>
+                    <p>Ouvrez la page <span class="highlight">chrome://extensions</span> dans votre navigateur Google
+                        Chrome ou Edge.</p>
+                    <div class="image-container">
+                        <img src="capture/Mode developpeur.png" alt="Mode développeur">
+                    </div>
+                    <p>Activez l'interrupteur "Mode développeur" en haut à droite.</p>
+                </div>
+
+                <div class="step-item">
+                    <h3>Étape B : Charger le dossier</h3>
+                    <div class="image-container">
+                        <img src="capture/charger l'extension non empaquetee.png" alt="Charger extension">
+                    </div>
+                    <ul>
+                        <li>Cliquez sur le bouton <strong>"Charger l'extension non empaquetée"</strong>.</li>
+                        <li>Sélectionnez le dossier <span class="highlight">extension_clean</span> de DoulGet.</li>
+                    </ul>
+                </div>
+
+                <div class="step-item">
+                    <h3>Étape C : Vérification</h3>
+                    <div class="image-container">
+                        <img src="capture/Extension_DoulGet.png" alt="Extension installée">
+                    </div>
+                    <p>L'extension <span class="highlight">DoulGet Assistant</span> doit maintenant apparaître parmi vos
+                        extensions actives.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 3: YOUTUBE & DOWNLOAD -->
+        <section id="youtube">
+            <h2><span>3</span> Utilisation sur YouTube</h2>
+            <p>Une fois l'extension installée, le téléchargement devient un jeu d'enfant sur YouTube et d'autres
+                plateformes.</p>
+
+            <div class="step-grid">
+                <div class="step-item">
+                    <h3>Apparition du menu</h3>
+                    <div class="image-container">
+                        <img src="capture/Extension s'affiche.png" alt="Menu extension">
+                    </div>
+                    <p>Sur une page vidéo, l'extension affiche un menu contextuel élégant sur le bord de l'écran ou
+                        au-dessus de la vidéo.</p>
+                </div>
+
+                <div class="step-item">
+                    <h3>Choix du Format</h3>
+                    <div class="image-container">
+                        <img src="capture/je clic soit sur video ou audio.png" alt="Choix format">
+                    </div>
+                    <p>DoulGet vous propose le choix : Télécharger en mode <strong>Vidéo</strong> (haute qualité) ou
+                        <strong>Audio</strong> (extraction MP3).</p>
+                </div>
+
+                <div class="step-item">
+                    <h3>Lancement du téléchargement</h3>
+                    <div class="image-container">
+                        <img src="capture/et voila sa commence a se telcharger.png" alt="Progression">
+                    </div>
+                    <p>Le bouton se transforme pour vous montrer la progression en direct. Vos fichiers sont gérés par
+                        le mode Turbo de l'application logicielle.</p>
+                </div>
+
+                <div class="step-item">
+                    <h3>Confirmation Finale</h3>
+                    <div class="image-container">
+                        <img src="capture/sa me montre 100%.png" alt="Terminé">
+                    </div>
+                    <p>Une notification s'affiche dès que le téléchargement atteint <span class="highlight">100%</span>.
+                        Votre vidéo est prête !</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 4: PARAMETRES & CORBEILLE -->
+        <section id="parametres">
+            <h2><span>4</span> Paramètres et Corbeille</h2>
+            <p>Personnalisez votre expérience et gérez vos anciens fichiers.</p>
+
+            <div class="step-grid">
+                <div class="step-item">
+                    <h3>Réglages Avancés</h3>
+                    <div class="image-container">
+                        <img src="capture/Parametre.png" alt="Paramètres">
+                    </div>
+                    <ul>
+                        <li>Changez le <strong>dossier de destination</strong>.</li>
+                        <li>Réglez le nombre de <strong>téléchargements simultanés</strong> pour économiser votre bande
+                            passante.</li>
+                    </ul>
+                </div>
+
+                <div class="step-item">
+                    <h3>La Corbeille</h3>
+                    <div class="image-container">
+                        <img src="capture/corbeille.png" alt="Corbeille">
+                    </div>
+                    <p>Les téléchargements annulés sont stockés ici. Vous pouvez les <strong>reprendre</strong> à tout
+                        moment sans recommencer à zéro.</p>
+                </div>
+            </div>
+        </section>
+
+        <div class="note">
+            <strong>Important :</strong> Gardez toujours l'application DoulGet ouverte pendant que vous utilisez
+            l'extension pour garantir une vitesse maximale.
+        </div>
+
+        <footer>
+            <p>&copy; 2026 DoulGet - Version Professionnelle</p>
+            <p>Merci d'avoir choisi le gestionnaire de téléchargement le plus rapide du marché.</p>
+        </footer>
+    </div>
+</body>
+
+</html>

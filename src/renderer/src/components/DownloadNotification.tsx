@@ -7,6 +7,7 @@ interface DetectedDownload {
     filename: string;
     mimeType: string;
     size: number;
+    audioOnly?: boolean;
 }
 
 export function DownloadNotification() {
@@ -35,7 +36,7 @@ export function DownloadNotification() {
     }, []);
 
     const handleAccept = (download: DetectedDownload) => {
-        window.api.acceptDetectedDownload(download.url);
+        window.api.acceptDetectedDownload(download.url, !!download.audioOnly);
         setDetectedDownloads(prev => prev.filter(d => d.url !== download.url));
     };
 

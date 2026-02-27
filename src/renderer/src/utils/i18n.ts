@@ -81,16 +81,20 @@ export interface Translations {
     resumeAll: string;
     stopAll: string;
     viewLogs: string;
+    restore: string;
+    restoreSelected: string;
   };
   // AddDownloadModal
-  addDownload: {
-    title: string;
-    downloadUrl: string;
-    cancel: string;
-    startDownload: string;
-    placeholder: string;
-    placeholderSocial: string;
-  };
+    addDownload: {
+      title: string;
+      downloadUrl: string;
+      cancel: string;
+      startDownload: string;
+      downloadVideo: string;
+      downloadAudio: string;
+      placeholder: string;
+      placeholderSocial: string;
+    };
   // Status
   status: {
     downloading: string;
@@ -198,12 +202,16 @@ const translations: Record<Language, Translations> = {
       resumeAll: 'Tout Reprendre',
       stopAll: 'Tout Arrêter',
       viewLogs: 'Voir les logs',
+      restore: 'Restaurer',
+      restoreSelected: 'Restaurer la sélection',
     },
     addDownload: {
       title: 'Ajouter un nouveau téléchargement',
       downloadUrl: 'URL de téléchargement',
       cancel: 'Annuler',
       startDownload: 'Démarrer le téléchargement',
+      downloadVideo: 'Télécharger Vidéo',
+      downloadAudio: 'Télécharger Audio (MP3)',
       placeholder: 'https://exemple.com/fichier.zip',
       placeholderSocial: 'https://{platform}.com/...',
     },
@@ -309,12 +317,16 @@ const translations: Record<Language, Translations> = {
       resumeAll: 'Resume All',
       stopAll: 'Stop All',
       viewLogs: 'View Logs',
+      restore: 'Restore',
+      restoreSelected: 'Restore Selected',
     },
     addDownload: {
       title: 'Add New Download',
       downloadUrl: 'Download URL',
       cancel: 'Cancel',
       startDownload: 'Start Download',
+      downloadVideo: 'Download Video',
+      downloadAudio: 'Download Audio (MP3)',
       placeholder: 'https://example.com/file.zip',
       placeholderSocial: 'https://{platform}.com/...',
     },

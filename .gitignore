@@ -25,3 +25,7 @@ resources/ffmpeg.exe
 # Debug files
 ytdlp-debug-output.txt
 *-player-script.js
+
+# Prevent large installers from going to GitHub
+vente/*.exe
+vente/*.zip

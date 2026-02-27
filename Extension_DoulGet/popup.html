@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="UTF-8">
   <style>
@@ -9,35 +10,42 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       margin: 0;
     }
+
     .header {
       display: flex;
       align-items: center;
       gap: 8px;
       margin-bottom: 16px;
     }
+
     .icon {
       width: 24px;
       height: 24px;
     }
+
     h1 {
       margin: 0;
       font-size: 16px;
       font-weight: 600;
     }
+
     .status {
       padding: 12px;
       border-radius: 8px;
       margin-bottom: 16px;
       font-size: 14px;
     }
+
     .status.connected {
       background-color: #d1fae5;
       color: #065f46;
     }
+
     .status.disconnected {
       background-color: #fee2e2;
       color: #991b1b;
     }
+
     .button {
       width: 100%;
       padding: 10px;
@@ -48,21 +56,26 @@
       cursor: pointer;
       transition: background-color 0.2s;
     }
+
     .button.primary {
       background-color: #3b82f6;
       color: white;
     }
+
     .button.primary:hover {
       background-color: #2563eb;
     }
+
     .button.secondary {
       background-color: #e5e7eb;
       color: #374151;
       margin-top: 8px;
     }
+
     .button.secondary:hover {
       background-color: #d1d5db;
     }
+
     .info {
       font-size: 12px;
       color: #6b7280;
@@ -71,33 +84,34 @@
     }
   </style>
 </head>
+
 <body>
   <div class="header">
-    <img src="icons/icon48.png" alt="DoulBrowser" class="icon">
-    <h1>DoulBrowser</h1>
+    <img src="icons/icon48.png" alt="DoulGet" class="icon">
+    <h1>DoulGet</h1>
   </div>
-  
+
   <div id="status" class="status">
     Vérification de la connexion...
   </div>
-  
+
   <button id="openApp" class="button primary" style="display: none;">
-    Ouvrir DoulBrowser
+    Ouvrir DoulGet
   </button>
-  
+
   <button id="testDownload" class="button secondary" style="display: none;">
     Tester la détection
   </button>
-  
+
   <button id="detectCurrentPage" class="button secondary" style="display: none; margin-top: 8px;">
     Détecter la page actuelle
   </button>
-  
+
   <div class="info">
-    L'extension détecte automatiquement les téléchargements et les vidéos YouTube, puis les envoie à DoulBrowser.
+    L'extension détecte automatiquement les téléchargements et les vidéos YouTube, puis les envoie à DoulGet.
   </div>
-  
+
   <script src="popup.js"></script>
 </body>
-</html>
 
+</html>

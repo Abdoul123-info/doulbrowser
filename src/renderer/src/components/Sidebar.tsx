@@ -1,4 +1,5 @@
-import { Download, CheckCircle, Clock, Trash2, LayoutGrid, Settings, Info } from 'lucide-react';
+import { Download, CheckCircle, Clock, Trash2, LayoutGrid, Settings, Info, Sparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from '../utils/i18n';
 
@@ -7,10 +8,50 @@ type SidebarProps = {
     onFilterChange: (filter: string) => void;
     onSettingsClick: () => void;
     onAboutClick: () => void;
+    onAdminClick: () => void;
 };
 
-export function Sidebar({ activeFilter, onFilterChange, onSettingsClick, onAboutClick }: SidebarProps) {
+export function Sidebar({ activeFilter, onFilterChange, onSettingsClick, onAboutClick, onAdminClick }: SidebarProps) {
     const { t } = useTranslation();
+    const [logoClicks, setLogoClicks] = useState(0);
+    const [version, setVersion] = useState('...');
+    const [updateInfo, setUpdateInfo] = useState<{ available: boolean, url?: string } | null>(null);
+
+    useEffect(() => {
+        // Get actual version
+        window.api.getAppVersion().then(v => setVersion(v));
+
+        // Initial update check
+        checkUpdates();
+
+        // Check for updates every 4 hours
+        const interval = setInterval(checkUpdates, 4 * 60 * 60 * 1000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const checkUpdates = async () => {
+        try {
+            const res = await window.api.checkAppUpdate();
+            if (res.updateAvailable) {
+                setUpdateInfo({ available: true, url: res.downloadUrl });
+            }
+        } catch (e) {
+            console.warn('[Update] Check failed:', e);
+        }
+    };
+
+    const handleLogoClick = () => {
+        const newCount = logoClicks + 1;
+        setLogoClicks(newCount);
+
+        if (newCount >= 5) {
+            onAdminClick();
+            setLogoClicks(0);
+        }
+
+        // Reset clicks after 2 seconds of inactivity
+        setTimeout(() => setLogoClicks(0), 2000);
+    };
 
     const menuItems = [
         { id: 'all', label: t.sidebar.allDownloads, icon: LayoutGrid },
@@ -23,9 +64,11 @@ export function Sidebar({ activeFilter, onFilterChange, onSettingsClick, onAbout
     return (
         <div className="w-64 bg-secondary/30 h-screen flex flex-col border-r border-border">
             <div className="p-6">
-                <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
-                    <Download className="w-8 h-8 text-blue-500" />
-                    DoulBrowser
+                <h1
+                    onClick={handleLogoClick}
+                    className="text-xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent cursor-default select-none active:scale-95 transition-transform"
+                >
+                    DoulGet
                 </h1>
             </div>
 
@@ -71,9 +114,18 @@ export function Sidebar({ activeFilter, onFilterChange, onSettingsClick, onAbout
                 </button>
             </nav>
 
-            <div className="p-4 border-t border-border">
-                <div className="text-xs text-muted-foreground text-center">
-                    v1.0.0
+            <div className="p-4 border-t border-border group relative">
+                {updateInfo?.available && (
+                    <button
+                        onClick={() => window.open(updateInfo.url, '_blank')}
+                        className="absolute -top-10 left-4 right-4 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-1.5 px-3 rounded-full shadow-lg animate-bounce flex items-center justify-center gap-1.5"
+                    >
+                        <Sparkles className="w-3 h-3" />
+                        MAJ DISPONIBLE
+                    </button>
+                )}
+                <div className="text-xs text-muted-foreground text-center font-mono opacity-50 group-hover:opacity-100 transition-opacity">
+                    v{version}
                 </div>
             </div>
         </div>

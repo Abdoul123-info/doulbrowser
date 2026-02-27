@@ -1,18 +1,18 @@
-import { X, Download, Link, Youtube } from 'lucide-react';
+import { X, Download, Link, Youtube, Music } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { useTranslation } from '../utils/i18n';
 
 type AddDownloadModalProps = {
     isOpen: boolean;
     onClose: () => void;
-    onAdd: (url: string) => void;
+    onAdd: (url: string, audioOnly: boolean) => void;
 };
 
 function detectSocialPlatform(url: string): { isSocial: boolean; platform: string } {
     try {
         const urlObj = new URL(url);
         const hostname = urlObj.hostname.toLowerCase();
-        
+
         if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
             return { isSocial: true, platform: 'YouTube' };
         }
@@ -40,7 +40,7 @@ function detectSocialPlatform(url: string): { isSocial: boolean; platform: strin
         if (hostname.includes('twitch.tv')) {
             return { isSocial: true, platform: 'Twitch' };
         }
-        
+
         return { isSocial: false, platform: '' };
     } catch {
         return { isSocial: false, platform: '' };
@@ -50,19 +50,11 @@ function detectSocialPlatform(url: string): { isSocial: boolean; platform: strin
 export function AddDownloadModal({ isOpen, onClose, onAdd }: AddDownloadModalProps) {
     const { t } = useTranslation();
     const [url, setUrl] = useState('');
-    
+
     const { isSocial, platform } = useMemo(() => url.trim() ? detectSocialPlatform(url.trim()) : { isSocial: false, platform: '' }, [url]);
 
     if (!isOpen) return null;
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (url.trim()) {
-            onAdd(url.trim());
-            setUrl('');
-            onClose();
-        }
-    };
 
     return (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200">
@@ -86,7 +78,7 @@ export function AddDownloadModal({ isOpen, onClose, onAdd }: AddDownloadModalPro
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit}>
+                <form onSubmit={(e) => e.preventDefault()}>
                     <div className="space-y-4">
                         <div>
                             <label htmlFor="url" className="block text-sm font-medium mb-1.5">
@@ -102,11 +94,10 @@ export function AddDownloadModal({ isOpen, onClose, onAdd }: AddDownloadModalPro
                                     value={url}
                                     onChange={(e) => setUrl(e.target.value)}
                                     placeholder={isSocial ? t.addDownload.placeholderSocial.replace('{platform}', platform.toLowerCase()) : t.addDownload.placeholder}
-                                    className={`w-full pl-9 pr-3 py-2 bg-secondary/80 text-foreground placeholder:text-muted-foreground border rounded-md focus:outline-none focus:ring-2 transition-all ${
-                                        isSocial 
-                                            ? 'border-red-500/50 focus:ring-red-500/50 focus:border-red-500' 
-                                            : 'border-border focus:ring-blue-500/50 focus:border-blue-500'
-                                    }`}
+                                    className={`w-full pl-9 pr-3 py-2 bg-secondary/80 text-foreground placeholder:text-muted-foreground border rounded-md focus:outline-none focus:ring-2 transition-all ${isSocial
+                                        ? 'border-red-500/50 focus:ring-red-500/50 focus:border-red-500'
+                                        : 'border-border focus:ring-blue-500/50 focus:border-blue-500'
+                                        }`}
                                     style={{ color: 'hsl(var(--foreground))' }}
                                     autoFocus
                                     required
@@ -114,20 +105,46 @@ export function AddDownloadModal({ isOpen, onClose, onAdd }: AddDownloadModalPro
                             </div>
                         </div>
 
-                        <div className="flex justify-end gap-3 pt-2">
+                        {/* Note d'information */}
+                        <p className="text-[11px] text-muted-foreground italic px-1">
+                            Collez un lien YouTube, Facebook ou direct pour commencer.
+                        </p>
+
+                        <div className="flex flex-col gap-2 pt-2">
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => {
+                                        if (url.trim()) {
+                                            onAdd(url.trim(), false);
+                                            setUrl('');
+                                            onClose();
+                                        }
+                                    }}
+                                    className="flex-1 px-4 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                >
+                                    <Download className="w-4 h-4" />
+                                    {t.addDownload.downloadVideo}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (url.trim()) {
+                                            onAdd(url.trim(), true);
+                                            setUrl('');
+                                            onClose();
+                                        }
+                                    }}
+                                    className="flex-1 px-4 py-2.5 text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-md shadow-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                >
+                                    <Music className="w-4 h-4" />
+                                    {t.addDownload.downloadAudio}
+                                </button>
+                            </div>
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
+                                className="w-full px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
                             >
                                 {t.addDownload.cancel}
-                            </button>
-                            <button
-                                type="submit"
-                                className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-sm transition-colors flex items-center gap-2"
-                            >
-                                <Download className="w-4 h-4" />
-                                {t.addDownload.startDownload}
                             </button>
                         </div>
                     </div>

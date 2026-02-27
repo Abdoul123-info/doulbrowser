@@ -1,5 +1,5 @@
-# Script de construction DoulBrowser (Sans Signature) - VERSION ROBUSTE
-Write-Host "Démarrage de la construction de DoulBrowser..." -ForegroundColor Cyan
+# Script de construction DoulGet (Sans Signature) - VERSION ROBUSTE
+Write-Host "Démarrage de la construction de DoulGet..." -ForegroundColor Cyan
 
 # 1. Configurer l'environnement pour ignorer la signature
 $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"

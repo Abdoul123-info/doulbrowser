@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DoulGet - Packshot Produit</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800;900&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: radial-gradient(ellipse at 50% 30%, #0c1a3a 0%, #060d1f 50%, #020510 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Outfit', sans-serif;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Ambient glow effects */
+        .glow-1 {
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
+            top: -100px;
+            left: -100px;
+            pointer-events: none;
+        }
+
+        .glow-2 {
+            position: absolute;
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, rgba(168, 85, 247, 0.12) 0%, transparent 70%);
+            bottom: -150px;
+            right: -50px;
+            pointer-events: none;
+        }
+
+        .glow-3 {
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(56, 189, 248, 0.08) 0%, transparent 70%);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .packshot {
+            width: 1200px;
+            height: 800px;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Main Title */
+        .brand {
+            text-align: center;
+            margin-bottom: 50px;
+            position: relative;
+            z-index: 10;
+        }
+
+        .brand-top {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 25px;
+        }
+
+        .brand-logo {
+            width: 90px;
+            height: 90px;
+            border-radius: 22px;
+            object-fit: contain;
+            filter: drop-shadow(0 0 30px rgba(59, 130, 246, 0.5)) drop-shadow(0 0 60px rgba(168, 85, 247, 0.3));
+            animation: logo-pulse 3s ease-in-out infinite alternate;
+        }
+
+        @keyframes logo-pulse {
+            0% {
+                filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.4)) drop-shadow(0 0 40px rgba(168, 85, 247, 0.2));
+            }
+
+            100% {
+                filter: drop-shadow(0 0 35px rgba(59, 130, 246, 0.7)) drop-shadow(0 0 70px rgba(168, 85, 247, 0.4));
+            }
+        }
+
+        .brand-name {
+            font-size: 6rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #60a5fa, #a855f7, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -3px;
+            line-height: 1;
+            text-shadow: 0 0 80px rgba(96, 165, 250, 0.3);
+        }
+
+        .tagline {
+            font-size: 1.4rem;
+            color: #64748b;
+            font-weight: 300;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            margin-top: 12px;
+        }
+
+        .sidebar-logo {
+            width: 22px;
+            height: 22px;
+            border-radius: 5px;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+
+        /* App Window Mockup */
+        .app-window {
+            width: 850px;
+            background: linear-gradient(145deg, #141c2e 0%, #0d1321 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow:
+                0 50px 100px -20px rgba(0, 0, 0, 0.7),
+                0 30px 60px -10px rgba(0, 0, 0, 0.5),
+                0 0 0 1px rgba(255, 255, 255, 0.05),
+                0 0 120px rgba(59, 130, 246, 0.1);
+            overflow: hidden;
+            position: relative;
+            z-index: 5;
+            transform: perspective(1200px) rotateX(5deg) rotateY(-2deg);
+        }
+
+        /* Title bar */
+        .title-bar {
+            display: flex;
+            align-items: center;
+            padding: 12px 18px;
+            background: rgba(0, 0, 0, 0.3);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .dots {
+            display: flex;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot.red {
+            background: #ef4444;
+        }
+
+        .dot.yellow {
+            background: #eab308;
+        }
+
+        .dot.green {
+            background: #22c55e;
+        }
+
+        .title-bar-text {
+            flex: 1;
+            text-align: center;
+            color: #64748b;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        /* App Content */
+        .app-content {
+            display: flex;
+            min-height: 350px;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 180px;
+            padding: 20px 0;
+            background: rgba(0, 0, 0, 0.2);
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .sidebar-brand {
+            padding: 0 20px 20px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #3b82f6;
+        }
+
+        .sidebar-item {
+            padding: 10px 20px;
+            color: #64748b;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-item.active {
+            color: white;
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 3px solid #3b82f6;
+        }
+
+        .sidebar-icon {
+            width: 16px;
+            height: 16px;
+            background: currentColor;
+            border-radius: 4px;
+            opacity: 0.5;
+        }
+
+        /* Main Area */
+        .main-area {
+            flex: 1;
+            padding: 20px;
+        }
+
+        .main-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .main-title {
+            color: white;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .add-btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 18px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        /* Download rows */
+        .dl-row {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            gap: 15px;
+        }
+
+        .dl-name {
+            flex: 1;
+            color: #cbd5e1;
+            font-size: 0.82rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dl-size {
+            color: #64748b;
+            font-size: 0.75rem;
+            width: 70px;
+            text-align: right;
+        }
+
+        .dl-progress {
+            width: 150px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .dl-progress-bar {
+            height: 100%;
+            border-radius: 3px;
+        }
+
+        .bar-green {
+            background: linear-gradient(90deg, #22c55e, #4ade80);
+        }
+
+        .bar-blue {
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            width: 68%;
+        }
+
+        .dl-status {
+            font-size: 0.72rem;
+            font-weight: 600;
+            width: 70px;
+            text-align: center;
+            padding: 4px 10px;
+            border-radius: 5px;
+        }
+
+        .status-done {
+            color: #22c55e;
+            background: rgba(34, 197, 94, 0.1);
+        }
+
+        .status-active {
+            color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        /* Features strip */
+        .features {
+            display: flex;
+            justify-content: center;
+            gap: 50px;
+            margin-top: 50px;
+            position: relative;
+            z-index: 10;
+        }
+
+        .feature {
+            text-align: center;
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 8px;
+        }
+
+        .feature-label {
+            color: #94a3b8;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        /* Floating particles */
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: rgba(96, 165, 250, 0.4);
+            border-radius: 50%;
+        }
+
+        .p1 {
+            top: 15%;
+            left: 10%;
+            width: 3px;
+            height: 3px;
+        }
+
+        .p2 {
+            top: 25%;
+            right: 15%;
+            width: 5px;
+            height: 5px;
+            opacity: 0.3;
+        }
+
+        .p3 {
+            bottom: 20%;
+            left: 20%;
+            width: 2px;
+            height: 2px;
+        }
+
+        .p4 {
+            top: 40%;
+            right: 8%;
+            width: 4px;
+            height: 4px;
+            opacity: 0.5;
+        }
+
+        .p5 {
+            bottom: 30%;
+            right: 25%;
+            width: 3px;
+            height: 3px;
+            opacity: 0.4;
+            background: rgba(168, 85, 247, 0.4);
+        }
+
+        .p6 {
+            top: 60%;
+            left: 8%;
+            width: 5px;
+            height: 5px;
+            opacity: 0.2;
+            background: rgba(168, 85, 247, 0.3);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="glow-1"></div>
+    <div class="glow-2"></div>
+    <div class="glow-3"></div>
+    <div class="particle p1"></div>
+    <div class="particle p2"></div>
+    <div class="particle p3"></div>
+    <div class="particle p4"></div>
+    <div class="particle p5"></div>
+    <div class="particle p6"></div>
+
+    <div class="packshot">
+        <!-- Brand Title -->
+        <div class="brand">
+            <div class="brand-top">
+                <img class="brand-logo" src="resources/icon.png" alt="DoulGet Logo">
+                <div class="brand-name">DoulGet</div>
+            </div>
+            <div class="tagline">Gestionnaire de Téléchargement Ultra-Rapide</div>
+        </div>
+
+        <!-- App Window -->
+        <div class="app-window">
+            <div class="title-bar">
+                <div class="dots">
+                    <div class="dot red"></div>
+                    <div class="dot yellow"></div>
+                    <div class="dot green"></div>
+                </div>
+                <div class="title-bar-text">DoulGet v1.9</div>
+                <div style="width: 60px;"></div>
+            </div>
+            <div class="app-content">
+                <div class="sidebar">
+                    <div class="sidebar-brand"><img class="sidebar-logo" src="resources/icon.png" alt="Logo">DoulGet
+                    </div>
+                    <div class="sidebar-item active">
+                        <div class="sidebar-icon"></div> Tous les fichiers
+                    </div>
+                    <div class="sidebar-item">
+                        <div class="sidebar-icon"></div> En cours
+                    </div>
+                    <div class="sidebar-item">
+                        <div class="sidebar-icon"></div> Terminés
+                    </div>
+                    <div class="sidebar-item">
+                        <div class="sidebar-icon"></div> En attente
+                    </div>
+                    <div class="sidebar-item">
+                        <div class="sidebar-icon"></div> Corbeille
+                    </div>
+                    <div class="sidebar-item" style="margin-top: 30px;">
+                        <div class="sidebar-icon"></div> Paramètres
+                    </div>
+                </div>
+                <div class="main-area">
+                    <div class="main-header">
+                        <div class="main-title">Tous les téléchargements</div>
+                        <div class="add-btn">+ Ajouter URL</div>
+                    </div>
+                    <div class="dl-row">
+                        <div class="dl-name">Harry Potter et La Coupe de Feu (2025).mp4</div>
+                        <div class="dl-size">1.2 GB</div>
+                        <div class="dl-progress">
+                            <div class="dl-progress-bar bar-green" style="width:100%"></div>
+                        </div>
+                        <div class="dl-status status-done">Terminé</div>
+                    </div>
+                    <div class="dl-row">
+                        <div class="dl-name">Formation Python Masterclass.mp4</div>
+                        <div class="dl-size">856 MB</div>
+                        <div class="dl-progress">
+                            <div class="dl-progress-bar bar-blue" style="width:68%"></div>
+                        </div>
+                        <div class="dl-status status-active">En Cours</div>
+                    </div>
+                    <div class="dl-row">
+                        <div class="dl-name">Podcast Tech Weekly - Episode 42.m4a</div>
+                        <div class="dl-size">45 MB</div>
+                        <div class="dl-progress">
+                            <div class="dl-progress-bar bar-green" style="width:100%"></div>
+                        </div>
+                        <div class="dl-status status-done">Terminé</div>
+                    </div>
+                    <div class="dl-row">
+                        <div class="dl-name">Adobe Premiere Tutorial Complet.mp4</div>
+                        <div class="dl-size">2.1 GB</div>
+                        <div class="dl-progress">
+                            <div class="dl-progress-bar bar-green" style="width:100%"></div>
+                        </div>
+                        <div class="dl-status status-done">Terminé</div>
+                    </div>
+                    <div class="dl-row">
+                        <div class="dl-name">Musique Lo-Fi Study Mix 2026.m4a</div>
+                        <div class="dl-size">128 MB</div>
+                        <div class="dl-progress">
+                            <div class="dl-progress-bar bar-green" style="width:100%"></div>
+                        </div>
+                        <div class="dl-status status-done">Terminé</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features -->
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-label">Mode Turbo</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🎬</div>
+                <div class="feature-label">Vidéo & Audio</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🌐</div>
+                <div class="feature-label">Extension Chrome</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🔒</div>
+                <div class="feature-label">Licence Sécurisée</div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
