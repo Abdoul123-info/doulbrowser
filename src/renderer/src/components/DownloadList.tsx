@@ -307,12 +307,12 @@ export function DownloadList({ filter }: DownloadListProps) {
         window.api.startDownload(url, savePath || undefined, audioOnly);
     }, [downloads]);
 
-    const handlePause = useCallback((url: string) => {
-        window.api.pauseDownload(url);
+    const handlePause = useCallback((url: string, audioOnly: boolean = false) => {
+        window.api.pauseDownload(url, audioOnly);
     }, []);
 
-    const handleResume = useCallback(async (url: string) => {
-        const item = downloads.find(d => d.url === url);
+    const handleResume = useCallback(async (url: string, audioOnly: boolean = false) => {
+        const item = downloads.find(d => d.url === url && !!d.audioOnly === !!audioOnly);
         let savePath = item?.savePath;
 
         // [v1.4.7] Fallback: If savePath is missing, ask the user to select the folder
@@ -323,25 +323,25 @@ export function DownloadList({ filter }: DownloadListProps) {
             if (savePath) {
                 // Update local status so the path is saved for next time
                 setDownloads(prev => prev.map(d =>
-                    d.url === url ? { ...d, savePath } : d
+                    (d.url === url && !!d.audioOnly === !!audioOnly) ? { ...d, savePath } : d
                 ));
             } else {
                 return; // User cancelled folder selection
             }
         }
 
-        window.api.resumeDownload(url, savePath, item?.name);
+        window.api.resumeDownload(url, savePath, item?.name, audioOnly);
     }, [downloads]);
 
-    const handleCancel = useCallback((url: string) => {
+    const handleCancel = useCallback((url: string, audioOnly: boolean = false) => {
         if (confirm(t.downloadList.cancelConfirm)) {
-            window.api.cancelDownload(url);
+            window.api.cancelDownload(url, audioOnly);
         }
     }, [t]);
 
-    const handleOpenFolder = useCallback((url: string) => {
-        const item = downloads.find(d => d.url === url);
-        window.api.openDownloadFolder(url, item?.savePath, item?.name);
+    const handleOpenFolder = useCallback((url: string, audioOnly: boolean = false) => {
+        const item = downloads.find(d => d.url === url && !!d.audioOnly === !!audioOnly);
+        window.api.openDownloadFolder(url, item?.savePath, item?.name, audioOnly);
     }, [downloads]);
 
     const handleDelete = useCallback((id: string) => {
@@ -565,7 +565,7 @@ export function DownloadList({ filter }: DownloadListProps) {
                                         <div className="flex flex-col gap-1">
                                             <div className="flex justify-between items-center text-xs text-muted-foreground">
                                                 <div className="flex items-center gap-1">
-                                                    <span>{item.progress}%</span>
+                                                    <span>{Math.round(item.progress)}%</span>
                                                     {item.segments && item.segments.length > 0 && (
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); toggleExpand(item.id); }}
@@ -587,7 +587,7 @@ export function DownloadList({ filter }: DownloadListProps) {
                                                                     item.status === 'interrupted' ? "bg-orange-500" :
                                                                         "bg-blue-500"
                                                     )}
-                                                    style={{ width: `${item.progress}%` }}
+                                                    style={{ width: `${Math.round(item.progress)}%` }}
                                                 />
                                             </div>
 
@@ -634,7 +634,7 @@ export function DownloadList({ filter }: DownloadListProps) {
                                         <div className="flex items-center justify-end gap-2 text-muted-foreground">
                                             {(item.status === 'downloading' || item.status === 'queued') && item.canResume !== false && (
                                                 <button
-                                                    onClick={() => item.url && handlePause(item.url)}
+                                                    onClick={() => item.url && handlePause(item.url, !!item.audioOnly)}
                                                     className="p-1.5 hover:bg-secondary rounded-md text-muted-foreground hover:text-foreground transition-colors"
                                                     title="Pause"
                                                 >
@@ -643,7 +643,7 @@ export function DownloadList({ filter }: DownloadListProps) {
                                             )}
                                             {(item.status === 'paused' || item.status === 'interrupted') && item.canResume !== false && (
                                                 <button
-                                                    onClick={() => item.url && handleResume(item.url)}
+                                                    onClick={() => item.url && handleResume(item.url, !!item.audioOnly)}
                                                     className="p-1.5 hover:bg-secondary rounded-md text-muted-foreground hover:text-foreground transition-colors"
                                                     title="Resume"
                                                     disabled={item.status === 'interrupted' && !item.canResume}
@@ -653,7 +653,7 @@ export function DownloadList({ filter }: DownloadListProps) {
                                             )}
                                             {(item.status === 'downloading' || item.status === 'queued' || item.status === 'paused' || item.status === 'interrupted') && (
                                                 <button
-                                                    onClick={() => item.url && handleCancel(item.url)}
+                                                    onClick={() => item.url && handleCancel(item.url, !!item.audioOnly)}
                                                     className="p-1.5 hover:bg-red-500/10 rounded-md text-muted-foreground hover:text-red-500 transition-colors"
                                                     title="Cancel"
                                                 >
@@ -662,7 +662,7 @@ export function DownloadList({ filter }: DownloadListProps) {
                                             )}
                                             {item.status === 'finished' && (
                                                 <button
-                                                    onClick={() => item.url && handleOpenFolder(item.url)}
+                                                    onClick={() => item.url && handleOpenFolder(item.url, !!item.audioOnly)}
                                                     className="p-1.5 hover:bg-secondary rounded-md text-muted-foreground hover:text-foreground transition-colors"
                                                     title="Open folder"
                                                 >

@@ -42,9 +42,28 @@ const api = {
   pingLicense: () => ipcRenderer.invoke('ping-license'),
   adminDeleteLicenseCloud: (password: string, targetMid: string) => ipcRenderer.invoke('admin-delete-license-cloud', password, targetMid),
   onLicenseDeactivated: (callback: (event: any, reason: string) => void) => ipcRenderer.on('license-deactivated', callback),
+  // [v1.2.9] MP3 Converter APIs 🎵
+  selectLocalVideo: () => ipcRenderer.invoke('select-local-video'),
+  localConvertVideoToMp3: (path: string) => ipcRenderer.invoke('local-convert-video-to-mp3', path),
+  onConversionProgress: (callback: (event: any, data: any) => void) => ipcRenderer.on('conversion-progress', callback),
+  // [v1.3.0] Video Compressor APIs 🎥
+  localCompressVideo: (path: string, quality: string) => ipcRenderer.invoke('local-compress-video', path, quality),
+  onCompressionProgress: (callback: (event: any, data: any) => void) => ipcRenderer.on('compression-progress', callback),
+  // [v1.4.0] Batch Downloader APIs 📋
+  getPlaylistInfo: (url: string) => ipcRenderer.invoke('get-playlist-info', url),
+  batchAddToQueue: (data: { items: any[], playlistTitle?: string, audioOnly: boolean }) => ipcRenderer.send('batch-add-to-queue', data),
+  // [v1.6.1] Feedback APIs ★
+  submitFeedback: (rating: number, comment: string) => ipcRenderer.invoke('submit-feedback', rating, comment),
+  adminGetFeedback: (password: string) => ipcRenderer.invoke('admin-get-feedback', password),
+  getFeedbackStatus: () => ipcRenderer.invoke('get-feedback-status'),
+  // [v1.6.0] Auto-Update APIs 🚀
+  startAppUpdate: (downloadUrl: string) => ipcRenderer.invoke('start-app-update', downloadUrl),
+  installAppUpdate: () => ipcRenderer.invoke('install-app-update'),
+  onUpdateProgress: (callback: (event: any, progress: number) => void) => ipcRenderer.on('update-progress', callback),
+  onUpdateReady: (callback: (event: any) => void) => ipcRenderer.on('update-ready', callback),
+  onUpdateError: (callback: (event: any, error: string) => void) => ipcRenderer.on('update-error', callback),
+  onExternalBatch: (callback: (event: any, data: any) => void) => ipcRenderer.on('external-batch', callback),
   removeDownloadListeners: () => {
-
-
     ipcRenderer.removeAllListeners('download-progress');
     ipcRenderer.removeAllListeners('download-started');
     ipcRenderer.removeAllListeners('download-complete');
@@ -54,6 +73,12 @@ const api = {
     ipcRenderer.removeAllListeners('download-error');
     ipcRenderer.removeAllListeners('download-detected');
     ipcRenderer.removeAllListeners('notification');
+    ipcRenderer.removeAllListeners('conversion-progress');
+    ipcRenderer.removeAllListeners('compression-progress');
+    ipcRenderer.removeAllListeners('update-progress');
+    ipcRenderer.removeAllListeners('update-ready');
+    ipcRenderer.removeAllListeners('update-error');
+    ipcRenderer.removeAllListeners('external-batch');
   }
 }
 

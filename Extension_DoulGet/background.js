@@ -45,6 +45,7 @@ const BLOCKED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.w
 const BLOCKED_FILENAMES = ['unnamed', 'response.bin', 'f.txt', 'checkbuild'];
 
 function sendToDoulGet(data) {
+    // ... (existing code omitted for brevity but preserved in the tool)
     // [v1.3.6] Block non-video URLs at the chokepoint (3-layer check)
     const url = (data.url || '').toLowerCase();
     const fname = (data.filename || '').toLowerCase();
@@ -68,6 +69,21 @@ function sendToDoulGet(data) {
             console.log('✅ Sent to DoulGet:', data.url.substring(0, 50) + '...');
         }
     }).catch(() => { });
+}
+
+function sendBatchToDoulGet(batchData) {
+    console.log('📦 Sending BATCH to DoulGet:', batchData.playlistTitle, `(${batchData.items.length} items)`);
+    fetch(`http://${DOULGET_HOST}:${DOULGET_PORT}/batch-download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batchData)
+    }).then(response => {
+        if (response.ok) {
+            console.log('✅ Batch successfully sent to DoulGet');
+        }
+    }).catch(err => {
+        console.error('❌ Failed to send batch:', err);
+    });
 }
 
 // 1. Capture Headers
@@ -475,6 +491,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return true;
         }
 
+        if (request.action === 'sendBatchDownload') {
+            sendBatchToDoulGet({
+                playlistTitle: request.playlistTitle || 'Batch Download',
+                items: request.items || [],
+                headers: request.headers || {}, // [v1.4.5] Fix 403: Forward headers to desktop app
+                timestamp: Date.now(),
+                tabId: sender.tab ? sender.tab.id : null
+            });
+            sendResponse({ success: true });
+            return true;
+        }
+
         // [v1.9.27] Cache metadata reported by content scripts (Top Frame)
         if (request.action === 'reportMetadata' && sender.tab) {
             tabMetadata.set(sender.tab.id, {
@@ -564,6 +592,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 .then(res => res.json())
                 .then(data => sendResponse({ success: true, data: data }))
                 .catch(err => sendResponse({ success: false, error: err.message }));
+            return true;
+        }
+
+        if (request.action === 'resolveLokLokStream') {
+            const { subjectId, detailPath, se, ep } = request;
+            const api = `https://lok-lok.cc/wefeed-h5api-bff/subject/play?subjectId=${subjectId}&se=${se}&ep=${ep}&detailPath=${detailPath}`;
+            
+            // [v1.4.5] Robust resolution with timeout to prevent message channel closure
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+            fetch(api, {
+                signal: controller.signal,
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Referer': 'https://lok-lok.cc/',
+                    'Origin': 'https://lok-lok.cc'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                clearTimeout(timeoutId);
+                if (data.streams && data.streams.length > 0) {
+                    sendResponse({ success: true, url: data.streams[0].url });
+                } else {
+                    sendResponse({ success: false, error: 'No streams found' });
+                }
+            })
+            .catch(err => {
+                clearTimeout(timeoutId);
+                sendResponse({ success: false, error: err.message });
+            });
             return true;
         }
 

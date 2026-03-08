@@ -1,7 +1,7 @@
 {
     "application": {
         "name": "DoulGet",
-        "version": "1.0.0",
+        "version": "1.6.2",
         "description": "Gestionnaire de téléchargements avancé avec accélération multi-threading",
         "appId": "com.doulget.app",
         "website": "https://doulget.com",
@@ -45,7 +45,13 @@
         "Interception automatique des téléchargements (comme IDM)",
         "Gestionnaire de files d'attente intelligent",
         "Reprise des téléchargements interrompus",
-        "Extension Chrome intégrée"
+        "Extension Chrome intégrée",
+        "Convertisseur MP3 intégré",
+        "Compresseur Vidéo intégré",
+        "Téléchargement groupé / Playlist",
+        "Mise à jour automatique",
+        "Système d'avis et commentaires",
+        "Support multilingue (Français / Anglais)"
     ],
     "credits": {
         "thirdParty": [

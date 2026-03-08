@@ -1,5 +1,5 @@
-import { X, Mail, Globe, Github, Award, Code2, Download, Users } from 'lucide-react';
-import aboutData from '../about.json';
+import { X, Award, Code2, Download, Users } from 'lucide-react';
+import { useTranslation } from '../utils/i18n';
 
 interface AboutModalProps {
     isOpen: boolean;
@@ -7,7 +7,16 @@ interface AboutModalProps {
 }
 
 export function AboutModal({ isOpen, onClose }: AboutModalProps) {
+    const { t } = useTranslation();
+
     if (!isOpen) return null;
+
+    const features = [
+        t.about.feature1, t.about.feature2, t.about.feature3,
+        t.about.feature4, t.about.feature5, t.about.feature6,
+        t.about.feature7, t.about.feature8, t.about.feature9,
+        t.about.feature10, t.about.feature11, t.about.feature12,
+    ];
 
     return (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
@@ -17,8 +26,8 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
                     <div className="flex items-center gap-3">
                         <Download className="w-8 h-8 text-white" />
                         <div>
-                            <h2 className="text-2xl font-bold text-white">{aboutData.application.name}</h2>
-                            <p className="text-blue-100 text-sm">Version {aboutData.application.version}</p>
+                            <h2 className="text-2xl font-bold text-white">DoulGet</h2>
+                            <p className="text-blue-100 text-sm">Version 1.6.2</p>
                         </div>
                     </div>
                     <button
@@ -34,7 +43,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
                     {/* Description */}
                     <div className="mb-6">
                         <p className="text-gray-300 text-lg leading-relaxed">
-                            {aboutData.application.description}
+                            {t.about.description}
                         </p>
                     </div>
 
@@ -42,25 +51,14 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
                     <div className="bg-white/5 rounded-lg p-6 mb-6 border border-white/10">
                         <div className="flex items-center gap-2 mb-4">
                             <Users className="w-5 h-5 text-blue-400" />
-                            <h3 className="text-xl font-semibold text-white">Développeur</h3>
+                            <h3 className="text-xl font-semibold text-white">{t.about.developer}</h3>
                         </div>
-                        <div className="space-y-3">
-                            <div className="flex items-start gap-3">
-                                <Award className="w-5 h-5 text-purple-400 mt-1" />
-                                <div>
-                                    <p className="text-white font-medium">{aboutData.developer.name}</p>
-                                    <p className="text-gray-400 text-sm">{aboutData.developer.role}</p>
-                                    <p className="text-gray-400 text-sm">{aboutData.developer.city}, {aboutData.developer.country}</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <Mail className="w-5 h-5 text-blue-400" />
-                                <a
-                                    href={`mailto:${aboutData.developer.email}`}
-                                    className="text-blue-400 hover:text-blue-300 transition-colors"
-                                >
-                                    {aboutData.developer.email}
-                                </a>
+                        <div className="flex items-start gap-3">
+                            <Award className="w-5 h-5 text-purple-400 mt-1" />
+                            <div>
+                                <p className="text-white font-medium">Oumarou Abdoul Jabbar</p>
+                                <p className="text-gray-400 text-sm">{t.about.role}</p>
+                                <p className="text-gray-400 text-sm">Niamey, Niger</p>
                             </div>
                         </div>
                     </div>
@@ -69,10 +67,10 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
                     <div className="mb-6">
                         <div className="flex items-center gap-2 mb-4">
                             <Code2 className="w-5 h-5 text-green-400" />
-                            <h3 className="text-xl font-semibold text-white">Fonctionnalités</h3>
+                            <h3 className="text-xl font-semibold text-white">{t.about.features}</h3>
                         </div>
                         <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {aboutData.features.map((feature, index) => (
+                            {features.map((feature, index) => (
                                 <li key={index} className="flex items-start gap-2 text-gray-300">
                                     <span className="text-green-400 mt-1">✓</span>
                                     <span>{feature}</span>
@@ -81,52 +79,10 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
                         </ul>
                     </div>
 
-                    {/* Technologies */}
-                    <div className="bg-white/5 rounded-lg p-6 mb-6 border border-white/10">
-                        <div className="flex items-center gap-2 mb-4">
-                            <Code2 className="w-5 h-5 text-orange-400" />
-                            <h3 className="text-xl font-semibold text-white">Technologies</h3>
-                        </div>
-                        <div className="space-y-2">
-                            <p className="text-gray-300"><span className="text-white font-medium">Framework:</span> {aboutData.technologies.framework}</p>
-                            <p className="text-gray-300"><span className="text-white font-medium">Moteur:</span> {aboutData.technologies.downloadEngine}</p>
-                            <p className="text-gray-300"><span className="text-white font-medium">Plateformes:</span> {aboutData.technologies.platforms.join(', ')}</p>
-                        </div>
-                    </div>
-
-                    {/* Credits */}
-                    <div className="mb-6">
-                        <div className="flex items-center gap-2 mb-4">
-                            <Github className="w-5 h-5 text-purple-400" />
-                            <h3 className="text-xl font-semibold text-white">Open Source</h3>
-                        </div>
-                        <div className="space-y-3">
-                            {aboutData.credits.thirdParty.map((lib, index) => (
-                                <div key={index} className="bg-white/5 rounded-lg p-4 border border-white/10">
-                                    <div className="flex items-start justify-between">
-                                        <div>
-                                            <h4 className="text-white font-medium">{lib.name}</h4>
-                                            <p className="text-gray-400 text-sm">{lib.description}</p>
-                                            <p className="text-gray-500 text-xs mt-1">Licence: {lib.license}</p>
-                                        </div>
-                                        <a
-                                            href={lib.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-400 hover:text-blue-300 transition-colors"
-                                        >
-                                            <Globe className="w-5 h-5" />
-                                        </a>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
                     {/* Copyright */}
                     <div className="text-center pt-6 border-t border-white/10">
-                        <p className="text-gray-400 text-sm">{aboutData.legal.copyright}</p>
-                        <p className="text-gray-500 text-xs mt-1">Licence {aboutData.legal.license}</p>
+                        <p className="text-gray-400 text-sm">{t.about.copyright}</p>
+                        <p className="text-gray-500 text-xs mt-1">{t.about.licenseLabel} MIT</p>
                     </div>
                 </div>
             </div>

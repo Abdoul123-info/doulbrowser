@@ -27,7 +27,7 @@ function checkConnection() {
       }
     })
     .then(data => {
-      statusDiv.textContent = '✓ Connecté à DoulGet';
+      statusDiv.textContent = chrome.i18n.getMessage('statusConnected');
       statusDiv.className = 'status connected';
       openAppButton.style.display = 'none';
       testDownloadButton.style.display = 'block';
@@ -35,7 +35,7 @@ function checkConnection() {
       chrome.storage.local.set({ doulbrowserConnected: true });
     })
     .catch(error => {
-      statusDiv.textContent = '✗ DoulGet n\'est pas en cours d\'exécution';
+      statusDiv.textContent = chrome.i18n.getMessage('statusDisconnected');
       statusDiv.className = 'status disconnected';
       openAppButton.style.display = 'block';
       testDownloadButton.style.display = 'none';
@@ -65,10 +65,10 @@ testDownloadButton.addEventListener('click', () => {
       timestamp: Date.now()
     })
   }).then(() => {
-    statusDiv.textContent = '✓ Test envoyé avec succès !';
+    statusDiv.textContent = chrome.i18n.getMessage('testSuccess');
     setTimeout(checkConnection, 2000);
   }).catch(() => {
-    statusDiv.textContent = '✗ Erreur lors de l\'envoi du test';
+    statusDiv.textContent = chrome.i18n.getMessage('testError');
   });
 });
 
@@ -82,15 +82,15 @@ detectCurrentPageButton.addEventListener('click', () => {
       if (currentUrl.includes('youtube.com/watch') || currentUrl.includes('youtu.be/')) {
         chrome.tabs.sendMessage(tabs[0].id, { action: 'detectVideo' }, (response) => {
           if (response && response.success) {
-            statusDiv.textContent = '✓ Vidéo détectée et envoyée !';
+            statusDiv.textContent = chrome.i18n.getMessage('videoDetected');
             setTimeout(checkConnection, 2000);
           } else {
-            statusDiv.textContent = '⚠️ Aucune vidéo détectée sur cette page';
+            statusDiv.textContent = chrome.i18n.getMessage('noVideoDetected');
             setTimeout(checkConnection, 2000);
           }
         });
       } else {
-        statusDiv.textContent = '⚠️ Cette page ne contient pas de vidéo YouTube';
+        statusDiv.textContent = chrome.i18n.getMessage('notYouTube');
         setTimeout(checkConnection, 2000);
       }
     }

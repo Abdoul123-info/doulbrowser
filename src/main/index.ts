@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, Notification, session } from 'electron'
 import type { DownloadItem } from 'electron'
-import { join, dirname } from 'path'
+import { join, dirname, sep } from 'path'
 import { existsSync, promises as fsPromises, readFileSync, writeFileSync } from 'fs'
 import * as fs from 'fs'
 import { spawn, execSync } from 'child_process'
@@ -212,18 +212,35 @@ async function getMachineId(): Promise<string> {
   try {
     if (process.platform === 'win32') {
       const output = execSync('wmic csproduct get uuid').toString()
-      return output.split('\n')[1].trim()
+      return output.split('\n')[1].trim().toUpperCase() // Force Uppercase & Trim
     } else if (process.platform === 'darwin') {
       const output = execSync("ioreg -rd1 -c IOPlatformExpertDevice | grep -E '(uuid|IOPlatformUUID)'").toString()
-      return output.split('"')[3].trim()
+      return output.split('"')[3].trim().toUpperCase()
     } else {
       // Linux
       const output = readFileSync('/var/lib/dbus/machine-id', 'utf8') || readFileSync('/etc/machine-id', 'utf8')
-      return output.trim()
+      return output.trim().toUpperCase()
     }
   } catch (e) {
     console.error('Failed to get Machine ID:', e)
-    return 'UNKNOWN-ID-' + process.platform
+    
+    // [v1.2.9] Persistent Fallback ID Security 🛡️
+    // If HWID fails, use a unique random ID stored on disk to prevent key sharing.
+    try {
+      const dataPath = app.getPath('userData')
+      const idFile = join(dataPath, 'machine-id.txt')
+      
+      if (existsSync(idFile)) {
+        return readFileSync(idFile, 'utf8').trim().toUpperCase()
+      } else {
+        const randomId = ('UNKNOWN-' + process.platform + '-' + crypto.randomBytes(4).toString('hex')).toUpperCase()
+        writeFileSync(idFile, randomId, 'utf8')
+        return randomId
+      }
+    } catch (saveErr) {
+      console.error('Failed to persist fallback ID:', saveErr)
+      return ('UNKNOWN-ID-' + process.platform).toUpperCase()
+    }
   }
 }
 
@@ -251,7 +268,7 @@ async function supabaseRequest(path: string, method: 'GET' | 'POST' | 'PATCH' | 
                 'apikey': SUPABASE_KEY,
                 'Authorization': `Bearer ${SUPABASE_KEY}`,
                 'Content-Type': 'application/json',
-                'Prefer': 'return=representation'
+                ...(method !== 'GET' ? { 'Prefer': 'return=minimal' } : {})
             },
             timeout: 10000
         };
@@ -260,8 +277,14 @@ async function supabaseRequest(path: string, method: 'GET' | 'POST' | 'PATCH' | 
             let data = '';
             res.on('data', (chunk) => data += chunk);
             res.on('end', () => {
+                // [v1.9.34] Check for HTTP success (2xx)
+                if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+                    console.error(`[Supabase Error] ${method} ${path} -> Status ${res.statusCode}: ${data.substring(0, 200)}`);
+                    return resolve(null);
+                }
+
                 try {
-                    const json = JSON.parse(data);
+                    const json = data ? JSON.parse(data) : {};
                     resolve(json);
                 } catch (e) {
                     resolve(null);
@@ -1562,17 +1585,18 @@ function extractSeriesMetadata(texts: string[]): string | null {
         if (match[2]) {
           // Season + Episode found
           const s = match[1].padStart(2, '0');
-          const e = match[2].padStart(2, '0');
+          let e = match[2];
+          // [v1.4.3] Normalize: if already 2+ digits, don't pad. If 1 digit, pad to 2.
+          if (e.length === 1) e = e.padStart(2, '0');
           // [v1.9.24] Block placeholder S00/E00
           if (s === '00' || e === '00') continue;
-          // Validate: seasons/episodes rarely exceed 999
-          if (parseInt(s) > 200 || parseInt(e) > 2000) continue; 
           return `S${s}E${e}`;
         } else {
           // Only Episode found
-          const e = match[1].padStart(2, '0');
-          if (e === '00') continue; // [v1.9.24] Block placeholder E00
-          if (parseInt(e) > 2000) continue; // Likely an ID
+          let e = match[1];
+          // [v1.4.3] Avoid double padding (ignore if already 2+)
+          if (e.length === 1) e = e.padStart(2, '0');
+          if (e === '00') continue;
           const s = fallbackS || '01'; 
           return `S${s}E${e}`;
         }
@@ -1871,20 +1895,22 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
       throw new Error(`Invalid content type: ${fileInfo.mimeType}. Likely an error page.`)
     }
 
-    // [v1.6.3] Unique Filename Logic: Prevent Overwriting
-    const baseFilename = fileInfo.filename || 'download.mp4'
-    const uniqueFilename = getUniqueFilename(savePath, baseFilename)
+    // [v1.2.9] RESUME LOGIC: If a filename is already associated with this download, use it.
+    // This prevents creating "video(1).mp4" upon resuming a paused download.
+    const baseFilename = tracker?.filename || fileInfo.filename || 'download.mp4'
+    const uniqueFilename = (tracker?.filename && fs.existsSync(join(savePath, tracker.filename + '.part'))) 
+      ? tracker.filename 
+      : getUniqueFilename(savePath, baseFilename)
 
     // Update tracker with actual filename
-    const existingTracker = activeDownloads.get(trackerId)
-    if (existingTracker) existingTracker.filename = uniqueFilename
+    if (tracker) tracker.filename = uniqueFilename
 
     if (!fileInfo.supportsRange || fileInfo.size === 0) {
       const filePath = join(savePath, uniqueFilename)
       return new Promise<void>((resolve, reject) => {
-        if (existingTracker) existingTracker.originalUrl = url
+        if (tracker) tracker.originalUrl = url
         // [v1.6.6] Use finalUrl for fallback download
-        downloadSingleStreamWithRedirects(fileInfo.finalUrl || url, filePath, requestHeaders, existingTracker, win, resolve, reject)
+        downloadSingleStreamWithRedirects(fileInfo.finalUrl || url, filePath, requestHeaders, tracker, win, resolve, reject)
       })
     }
     /* [v1.6.5] OLD FALLBACK DISABLED (Dead Code Wrapper)
@@ -2070,12 +2096,57 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
     } */
 
     // Étape 2: Diviser le fichier en segments et télécharger en parallèle
+    // [v1.2.9] AUTO-DYNAMIC CONNECTIONS ⚡
+    // If file is large enough, perform a quick speed test (512KB) to decide if we use multi-threading
+    if (fileInfo.size > 1024 * 1024) { // Only test if file > 1MB
+      console.log('[MultiThread] Testing connection speed...')
+      const testStart = Date.now()
+      const testResult = await new Promise<{ speed: number }>((resolve) => {
+        let testDownloaded = 0
+        const testOptions = {
+          hostname: new URL(fileInfo.finalUrl || url).hostname,
+          path: new URL(fileInfo.finalUrl || url).pathname + new URL(fileInfo.finalUrl || url).search,
+          method: 'GET',
+          headers: {
+            Range: 'bytes=0-524288',
+            'User-Agent': tracker?.headers?.['User-Agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            ...requestHeaders
+          }
+        }
+        const testReq = protocol.request(testOptions, (res: any) => {
+          res.on('data', (chunk: Buffer) => { testDownloaded += chunk.length })
+          res.on('end', () => {
+            const duration = (Date.now() - testStart) / 1000
+            const speed = testDownloaded / (duration || 0.1)
+            resolve({ speed })
+          })
+          res.on('error', () => resolve({ speed: 0 }))
+        })
+        testReq.on('error', () => resolve({ speed: 0 }))
+        testReq.setTimeout(5000, () => { testReq.destroy(); resolve({ speed: 0 }) })
+        testReq.end()
+      })
+
+      if (testResult.speed < 150 * 1024) { // If speed < 150 KB/s
+        numThreads = 1
+        console.log(`[MultiThread] Slow connection detected (${Math.round(testResult.speed / 1024)} KB/s), forced to 1 connection.`)
+      } else {
+        console.log(`[MultiThread] Fast connection detected (${Math.round(testResult.speed / 1024)} KB/s), using ${numThreads} connections.`)
+      }
+    }
+
+    // [v1.2.9] IDM Optimization: Use local temp directory on the SAME disk
+    const tempDir = join(savePath, '.doulget_tmp');
+    if (!fs.existsSync(tempDir)) {
+      try { fs.mkdirSync(tempDir, { recursive: true }); } catch (e) { }
+    }
+
     const segmentSize = Math.ceil(fileInfo.size / numThreads)
-    const filePath = join(savePath, uniqueFilename)
+    const finalPath = join(savePath, uniqueFilename)
+    const tempFilePath = join(tempDir, uniqueFilename + '.part')
     
     // [v1.7.2] PERFORMANCE: Pre-allocate file to allow parallel offset writing
-    const fs = require('fs')
-    fs.writeFileSync(filePath, '')
+    fs.writeFileSync(tempFilePath, '')
 
     // Initialize segment progress tracking
     if (tracker) {
@@ -2104,7 +2175,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
             }
           }
 
-          const fileStream = fs.createWriteStream(filePath, { 
+          const fileStream = fs.createWriteStream(tempFilePath, { 
             flags: 'r+', 
             start: start,
             highWaterMark: 1024 * 1024 // [v1.7.2] 1MB Buffer for faster disk I/O
@@ -2267,11 +2338,21 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
     // [v1.7.1] Cleanup persistent agent after download
     try { keepAliveAgent.destroy() } catch (e) { }
 
+    // [v1.2.9] CLEANUP: Move from temp to final destination
+    try {
+      if (fs.existsSync(tempFilePath)) {
+        fs.renameSync(tempFilePath, finalPath)
+        console.log(`[MultiThread] Moved temp file to: ${finalPath}`);
+      }
+    } catch (renameErr) {
+      console.error('[MultiThread] Failed to move from temp:', renameErr)
+    }
+
     win.webContents.send('download-complete', {
       filename: fileInfo.filename,
       url: url,
       state: 'finished',
-      savePath: filePath
+      savePath: finalPath
     })
     sendNotification(
       'Téléchargement terminé',
@@ -2279,6 +2360,14 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
       true
     )
     handleDownloadEnd(url)
+
+    // Optional: Cleanup empty folder
+    try {
+        const files = fs.readdirSync(tempDir);
+        if (files.length === 0) {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    } catch(e) {}
   } catch (error: any) {
     console.error('Multi-threaded download error:', error)
 
@@ -2299,7 +2388,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
       tracker.strategy = 'yt-dlp'
       win.webContents.send('download-status', { url, status: 'Falling back to safe mode...' })
       // Retry with yt-dlp using captured headers and PRESERVE filename/audioOnly
-      await downloadWithYtDlp(url, savePath, 'SafeMode', win, undefined, tracker?.filename || 'Generic', false, !!audioOnly)
+      await downloadWithYtDlp(url, savePath, 'SafeMode', win, undefined, tracker?.filename || 'Generic', false, !!audioOnly, tracker?.headers)
       return
     }
 
@@ -2498,7 +2587,8 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
         undefined,
         initialTracker.filename,
         false, // _isRetry
-        queuedItem.audioOnly // [v1.7.0] Correct parameter position
+        queuedItem.audioOnly, // [v1.7.0] Correct parameter position
+        queuedItem.headers // [v1.4.4] Pass headers to fix 403 errors
       )
     } else {
       console.log('[DEBUG] Starting Direct Download (Multi-threading)...')
@@ -2522,7 +2612,8 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
           undefined,
           initialTracker.filename,
           false,
-          queuedItem.audioOnly
+          queuedItem.audioOnly,
+          queuedItem.headers // [v1.4.4] Pass headers to fix 403 errors
         )
         handleDownloadEnd(url, !!queuedItem.audioOnly)
         return
@@ -2662,9 +2753,22 @@ function addToDownloadQueue(
     return
   }
 
+  // [v1.2.9] AUTOMATIC FOLDER ORGANIZATION 📂
+  const baseDir = savePath || appSettings.downloadPath
+  const subFolder = audioOnly ? 'Audios' : 'Videos'
+  
+  // Robust check: prevent "Videos/Videos" on Windows and POSIX
+  const finalSavePath = (baseDir.endsWith(subFolder) || baseDir.includes(sep + subFolder + sep) || baseDir.endsWith(sep + subFolder))
+    ? baseDir
+    : join(baseDir, subFolder)
+
+  if (!fs.existsSync(finalSavePath)) {
+    try { fs.mkdirSync(finalSavePath, { recursive: true }) } catch (e) { }
+  }
+
   const queuedItem: QueuedDownload = {
     url,
-    savePath: savePath || appSettings.downloadPath,
+    savePath: finalSavePath,
     filename,
     type,
     mimeType,
@@ -2692,7 +2796,8 @@ function addToDownloadQueue(
     speed: '-',
     status: 'queued',
     timeLeft: '--',
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    savePath: finalSavePath // [v1.4.1] CRITICAL for automatic Resume
   })
 
   processDownloadQueue()
@@ -2775,7 +2880,8 @@ async function downloadWithYtDlp(
   formatId?: string,
   customFilename?: string,
   _isRetry: boolean = false,
-  audioOnly: boolean = false // [v1.7.0] Pass format flag
+  audioOnly: boolean = false, // [v1.7.0] Pass format flag
+  requestHeaders: Record<string, string> = {} // [v1.4.5] Fix 403: Accept explicit headers
 ) {
   let cookieFile: string | null = null
   let tracker: any = null
@@ -2783,7 +2889,9 @@ async function downloadWithYtDlp(
   try {
     const trackerId = getTrackerId(url, audioOnly)
     tracker = activeDownloads.get(trackerId)
-    const requestHeaders = tracker?.headers || {}
+    
+    // [v1.4.5] Use headers from parameter if tracker is not yet available (batch fallback)
+    const effectiveHeaders = { ...(requestHeaders || {}), ...(tracker?.headers || {}) }
 
     // Obtenir le chemin de yt-dlp
     const finalYtDlpPath = ensureYtDlpAvailable()
@@ -2817,7 +2925,7 @@ async function downloadWithYtDlp(
       
       const hasSignature = /[?&](sign|token|expires?|t)=/i.test(cleanUrl)
       const useRestrictedThreads = isSensitiveDomain || hasSignature
-      const restrictedNCount = 8
+      const restrictedNCount = 16 // [v1.5.0] Boosted from 8 to 16 for Nitro mode
       
       // [v1.8.4] HLS DETECTION for progress scaling
       const isHLS = cleanUrl.includes('.m3u8') || isSensitiveDomain
@@ -2876,26 +2984,32 @@ async function downloadWithYtDlp(
           }
 
           // [v1.8.5] UNIQUENESS CHECK: Ensure filename doesn't collide with existing files OR ongoing downloads
-          // This prevents "Aria2c code 1" (file lock) errors for series with same episode titles.
+          // [v1.2.9] RESUME FIX: Skip if we already have this filename in the tracker and it exists on disk
           let checkName = finalCustomFilename;
           let counter = 1;
-          const fs = require('fs');
-          const path = require('path');
-          
-          // Check for .mp4, .part, .ytdl, etc.
+
           const isTaken = (name: string) => {
+            const path = require('path');
             const base = path.join(savePath, name);
+            // If the name belongs to CURRENT tracker, it's not "taken" by someone else
+            if (tracker?.filename === name) return false;
+
             return fs.existsSync(base + '.mp4') || 
                    fs.existsSync(base + '.part') || 
                    fs.existsSync(base + '.ytdl') ||
                    fs.existsSync(base + '.mp4.part');
           };
 
-          while (isTaken(checkName)) {
-            checkName = `${finalCustomFilename}(${counter})`;
-            counter++;
+          if (!(tracker?.filename && (fs.existsSync(join(savePath, tracker.filename + '.part')) || fs.existsSync(join(savePath, tracker.filename + '.ytdl'))))) {
+            while (isTaken(checkName)) {
+              checkName = `${finalCustomFilename}(${counter})`;
+              counter++;
+            }
+            finalCustomFilename = checkName;
+          } else {
+            finalCustomFilename = tracker.filename;
+            console.log(`[yt-dlp] Resuming with existing filename: ${finalCustomFilename}`);
           }
-          finalCustomFilename = checkName;
         }
         // 3. AGGRESSIVE SCAN: Look for ANY .part file in the directory that matches our restricted base
         // or contains a significant portion of it.
@@ -2957,8 +3071,6 @@ async function downloadWithYtDlp(
         '--no-mtime', // Ne pas restaurer la date de modif (perf Windows)
         '--continue', // CRITIQUE: Force la reprise des fichiers partiellement téléchargés
         '--no-playlist', // CRITIQUE: Télécharger UNIQUEMENT la vidéo spécifiée, pas toute la playlist
-        '-N',
-        useRestrictedThreads ? restrictedNCount.toString() : '16', // [v1.8.3] Dynamic thread scaling
         '--http-chunk-size',
         '100M', // [v1.7.2] Huge chunks for multigigabit connections
         '--buffer-size',
@@ -2971,24 +3083,20 @@ async function downloadWithYtDlp(
         '--no-cache-dir', // [v1.7.3] Ensure fresh requests
         '--verbose', // [v1.7.6] Diagnostic info for speed bottlenecks
         '--no-keep-fragments', // [v1.7.7] Force cleanup of temporary segments
-        // [v1.8.3] HLS OPTIMIZATIONS
-        '--concurrent-fragments', useRestrictedThreads ? '8' : '16',
-        '--hls-use-mpegts',
-        '--postprocessor-args', 'Merger+ffmpeg:-c copy' // [v1.9.30] Fast merge for HLS/Streaming
+        '--postprocessor-args', 'Merger+ffmpeg:-c copy -threads 0' // [v1.5.4] ULTRA-FAST merge for all platforms
       ]
 
-      // [v1.7.2] Use aria2c as external downloader for massive multi-connection speedup
-      // [v1.9.8] PALKAD OPTIMIZATION: Disable aria2c for lok-lok/palkad/moovbob to fix progress/size issues.
+      // [v1.9.8] PALKAD OPTIMIZATION: Disable aria2c for lok-lok/palkad/moovbob/hakuna to fix progress/size/403 issues.
       // Native yt-dlp with --concurrent-fragments is fast enough and reports accurate HLS progress.
-      const isPalkadGroup = cleanUrl.includes('lok-lok.cc') || cleanUrl.includes('palkad') || cleanUrl.includes('moovbob.fr') || cleanUrl.includes('sibnet.ru');
+      const isPalkadGroup = cleanUrl.includes('lok-lok.cc') || cleanUrl.includes('palkad') || cleanUrl.includes('moovbob.fr') || cleanUrl.includes('sibnet.ru') || cleanUrl.includes('hakunaymatata.com');
       
       if (hasAria2 && aria2Path && !isPalkadGroup) {
         downloadArgs.push('--downloader', aria2Path)
         // [v1.7.6] ABSOLUTE TURBO: Added --min-split-size=1M and --summary-interval=1
-        // [v1.3.6] IDM Optimization: Use falloc for pre-allocation, increase min-split-size to 50M
+        // [v1.3.6] IDM Optimization: Use falloc for pre-allocation, increase min-split-size to 1M (Nitro)
         const ariaArgs = useRestrictedThreads 
-          ? 'aria2c:-x 8 -s 8 -j 16 -k 1M --min-split-size=50M --summary-interval=1 --file-allocation=falloc --check-certificate=false --no-conf'
-          : 'aria2c:-x 16 -s 16 -j 32 -k 1M --min-split-size=50M --summary-interval=1 --file-allocation=falloc --check-certificate=false --no-conf'
+          ? `aria2c:-x ${restrictedNCount} -s ${restrictedNCount} -j 32 -k 1M --min-split-size=1M --summary-interval=1 --file-allocation=falloc --check-certificate=false --no-conf`
+          : 'aria2c:-x 16 -s 16 -j 32 -k 1M --min-split-size=1M --summary-interval=1 --file-allocation=falloc --check-certificate=false --no-conf'
         
         downloadArgs.push('--downloader-args', ariaArgs)
         console.log(`[yt-dlp] Turbo Mode Enabled: Using aria2c (${useRestrictedThreads ? 'Safe Restricted' : 'Absolute Turbo'})`)
@@ -3017,6 +3125,7 @@ async function downloadWithYtDlp(
         downloadArgs.push('-f', `${formatId} +bestaudio / best`)
         if (hasFfmpeg && ffmpegPath) downloadArgs.push('--ffmpeg-location', ffmpegPath)
         downloadArgs.push('--merge-output-format', 'mp4')
+        downloadArgs.push('--postprocessor-args', 'Merger+ffmpeg:-c copy -threads 0') // [v1.5.4]
         console.log(`[yt - dlp] Using custom format: ${formatId} `)
       }
       // DEFAULT VIDEO LOGIC - v19: Maximum Quality
@@ -3032,9 +3141,8 @@ async function downloadWithYtDlp(
               '-f',
               'bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/best[ext=mp4]/best',
               '--merge-output-format',
-              'mp4',
-              '--postprocessor-args',
-              'Merger+ffmpeg:-c copy' // [v1.7.2] Instant merge
+              'mp4'
+              // Note: Global postprocessor-args already set above for v1.5.5
             )
             console.log('[yt-dlp] YouTube: Using ULTRA-FAST compat selector (AVC+M4A)')
           } else {
@@ -3149,11 +3257,15 @@ async function downloadWithYtDlp(
           console.error('[yt-dlp] Failed to generate cookie file:', err)
           // v1.2.6: REMOVED --cookies-from-browser fallback to avoid Windows locking
         }
-      } else if (Object.keys(requestHeaders).length > 0 && !isSocialPlatform && !isYouTube) {
-        // For non-social sites (excluding YouTube), direct headers work fine
-        console.log('[yt-dlp] Passing session headers directly')
-        for (const key in requestHeaders) {
-          downloadArgs.push('--add-header', `${key}:${requestHeaders[key]}`)
+      } else if (Object.keys(effectiveHeaders).length > 0 && !isSocialPlatform && !isYouTube) {
+        // [v1.4.5] LOG: Verify header injection
+        console.log('[yt-dlp] Passing session headers directly:', Object.keys(effectiveHeaders).join(', '));
+        for (const key in effectiveHeaders) {
+          if (key.toLowerCase() === 'user-agent') {
+            downloadArgs.push('--user-agent', effectiveHeaders[key])
+          } else {
+            downloadArgs.push('--add-header', `${key}:${effectiveHeaders[key]}`)
+          }
         }
       } else if (isYouTube) {
         console.log('[yt-dlp] YouTube: Skipping cookies (better compatibility with anonymous access)')
@@ -3731,6 +3843,16 @@ async function downloadWithYtDlp(
       // [v1.7.7] SUCCESS CLEANUP: Remove any stray fragments that merger might have missed
       cleanupDebris(savePath, tracker?.filename || customFilename || 'download')
 
+      // [v1.2.9] CLEANUP: Remove empty temp folder
+      try {
+        if (existsSync(tempDir)) {
+          const files = fs.readdirSync(tempDir);
+          if (files.length === 0) {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+          }
+        }
+      } catch (e) { }
+
     } else {
       throw new Error('yt-dlp executable not found.')
     }
@@ -3950,9 +4072,8 @@ function startExtensionServer() {
           mainWindow.focus()
 
           // Quality Selector: DISABLED categorically for maximum speed (V17)
-          // Direct download proceeds for all sites
-
-          // Ajouter à la file d'attente au lieu de démarrer directement
+          // [v1.2.9] AUTOMATIC FOLDER ORGANIZATION 📂
+          // Handled by addToDownloadQueue but we ensure parent exists
           const downloadFolder = appSettings.downloadPath
           console.log('📁 Dossier de téléchargement:', downloadFolder)
 
@@ -3989,6 +4110,76 @@ function startExtensionServer() {
               details: body ? 'Body received but parsing failed' : 'Empty body'
             })
           )
+        }
+      })
+      return
+    }
+
+    // [v1.7.0] Endpoint pour recevoir un lot (Batch) de téléchargements
+    if (url.pathname === '/batch-download' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => {
+        body += chunk.toString()
+      })
+      req.on('end', async () => {
+        try {
+          if (!body || body.trim() === '') {
+            res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders })
+            res.end(JSON.stringify({ error: 'Empty request body' }))
+            return
+          }
+
+          const data = JSON.parse(body)
+          const playlistTitle = (data.playlistTitle || 'Batch Download').replace(/[<>:"/\\|?*]/g, ' ').trim()
+          const items = data.items || []
+
+          if (items.length === 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders })
+            res.end(JSON.stringify({ error: 'No items in batch' }))
+            return
+          }
+
+          const windows = BrowserWindow.getAllWindows()
+          const mainWindow = windows.find((w) => !w.isDestroyed())
+          if (!mainWindow) {
+            res.writeHead(500, { 'Content-Type': 'application/json', ...corsHeaders })
+            res.end(JSON.stringify({ error: 'Main window not found' }))
+            return
+          }
+
+          // Bring UI to front for feedback
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.show()
+          mainWindow.focus()
+
+          // [v1.7.0] Create specific subfolder for this batch
+          const baseFolder = appSettings.downloadPath
+          const batchFolder = join(baseFolder, 'Videos', playlistTitle)
+          
+          if (!fs.existsSync(batchFolder)) {
+            try { fs.mkdirSync(batchFolder, { recursive: true }) } catch (e) { }
+          }
+
+          console.log(`📦 Batch Download received: ${playlistTitle} (${items.length} items)`)
+
+          // [v1.6.0] Items now arrive with resolved CDN URLs from extension click-and-capture
+          mainWindow.webContents.send('external-batch', {
+            playlistTitle,
+            items: items.map((item: any, idx: number) => ({
+              id: `ext-${idx}-${Date.now()}`,
+              url: item.url,
+              title: item.filename,
+              selected: true
+            })),
+            headers: data.headers || {}
+          })
+
+          res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders })
+          res.end(JSON.stringify({ success: true, count: items.length }))
+        } catch (error: any) {
+          console.error('DoulBrowser: Erreur dans /batch-download:', error)
+          res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders })
+          res.end(JSON.stringify({ error: error.message || 'Invalid Batch JSON' }))
         }
       })
       return
@@ -4341,10 +4532,17 @@ app.whenReady().then(() => {
       }
     }
 
+    // [v1.2.9] AUTOMATIC FOLDER ORGANIZATION 📂
+    const subFolder = (!!audioOnly) ? 'Audios' : 'Videos'
+    const finalPath = join(appSettings.downloadPath, subFolder)
+    if (!fs.existsSync(finalPath)) {
+      try { fs.mkdirSync(finalPath, { recursive: true }) } catch (e) { }
+    }
+
     // Delegate to yt-dlp with specific format
     await downloadWithYtDlp(
       url,
-      appSettings.downloadPath,
+      finalPath,
       'Generic',
       mainWindow,
       formatId,
@@ -4414,11 +4612,11 @@ app.whenReady().then(() => {
         url.toLowerCase().includes('soundcloud.com')
 
       const finalAudioOnly = audioOnly || isAudioHeuristic
-
+      
       addToDownloadQueue(
         url,
         win,
-        downloadFolder,
+        downloadFolder, // addToDownloadQueue will now handle the subfolder logic internally
         undefined, // filename
         undefined, // type
         undefined, // mimeType
@@ -4474,7 +4672,7 @@ app.whenReady().then(() => {
 
       win?.webContents.send('download-paused', {
         url,
-        progress: tracker.lastProgress !== undefined ? tracker.lastProgress : 0
+        progress: tracker.lastProgress !== undefined ? Math.round(tracker.lastProgress) : 0
       })
       return
     }
@@ -4824,13 +5022,19 @@ app.whenReady().then(() => {
           finalKey = signLicense(mid, verification.expiry as string)
       }
 
-      // [v1.9.32] Sync to Cloud with extra metadata
-      await updateLicenseOnline(mid, {
+      // [v1.9.34] Sync to Cloud with MANDATORY check & unblock
+      const syncSuccess = await updateLicenseOnline(mid, {
           license_key: finalKey,
           expiry_date: verification.expiry as string,
           activated_at: new Date().toISOString(),
-          original_key: key // Track the input key (e.g. DadiLicence2026)
-      }, true) // allowInsert = true ONLY during initial activation
+          original_key: key,
+          is_blocked: false // Always unblock if a valid activation happens
+      }, true); // allowInsert = true
+
+      if (!syncSuccess) {
+          console.error('[Licensing] Database sync failed during activation.');
+          return { success: false, error: 'Erreur de synchronisation Cloud. Veuillez vérifier votre connexion.' }
+      }
 
       const updated = saveSettings({
         isActivated: true,
@@ -4987,7 +5191,8 @@ app.whenReady().then(() => {
     if (!checkAdminPassword(password)) {
         return { success: false, error: 'Mot de passe admin incorrect.' }
     }
-    const result = await supabaseRequest(`licences?hwid=eq.${encodeURIComponent(targetMid)}`, 'DELETE');
+    const cleanMid = targetMid.trim().toUpperCase();
+    const result = await supabaseRequest(`licences?hwid=eq.${encodeURIComponent(cleanMid)}`, 'DELETE');
     return { success: result !== null };
   })
 
@@ -5000,18 +5205,109 @@ app.whenReady().then(() => {
     const urlData = await supabaseRequest('app_config?key=eq.update_url', 'GET');
     
     if (data && Array.isArray(data) && data.length > 0) {
-        const latest = data[0].value;
-        const current = app.getVersion();
+        const latestRaw = data[0].value;
+        const currentRaw = app.getVersion();
         const updateUrl = (urlData && Array.isArray(urlData) && urlData.length > 0) ? urlData[0].value : 'https://doulget.com';
+
+        // [v1.5.2] Robust version comparison
+        const normalize = (v: string) => v.toLowerCase().replace(/^v/, '').trim();
+        const latest = normalize(latestRaw);
+        const current = normalize(currentRaw);
+
+        // Semver comparison logic: returns true if 'v1' > 'v2'
+        const isNewer = (v1: string, v2: string) => {
+            const parts1 = v1.split('.').map(Number);
+            const parts2 = v2.split('.').map(Number);
+            for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+                const p1 = parts1[i] || 0;
+                const p2 = parts2[i] || 0;
+                if (p1 > p2) return true;
+                if (p1 < p2) return false;
+            }
+            return false;
+        };
         
         return {
-            updateAvailable: latest !== current, // Simplified check, assumes higher version in DB
-            latestVersion: latest,
-            currentVersion: current,
+            updateAvailable: isNewer(latest, current), 
+            latestVersion: latestRaw,
+            currentVersion: currentRaw,
             downloadUrl: updateUrl
         };
     }
     return { updateAvailable: false };
+  })
+
+  // [v1.6.0] Start downloading the update file to %TEMP%
+  ipcMain.handle('start-app-update', async (event, downloadUrl: string) => {
+    const tempPath = join(app.getPath('temp'), 'DoulGet_Update.exe');
+    
+    console.log(`[Update] Starting download from: ${downloadUrl}`);
+    console.log(`[Update] Target path: ${tempPath}`);
+
+    try {
+        // Remove old update if exists
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+
+        const file = fs.createWriteStream(tempPath);
+        const request = https.get(downloadUrl, (response) => {
+            if (response.statusCode !== 200) {
+                console.error(`[Update] Failed to download: ${response.statusCode}`);
+                event.sender.send('update-error', 'Impossible de télécharger la mise à jour.');
+                return;
+            }
+
+            const totalSize = parseInt(response.headers['content-length'] || '0', 10);
+            let downloadedSize = 0;
+
+            response.on('data', (chunk) => {
+                downloadedSize += chunk.length;
+                file.write(chunk);
+                
+                if (totalSize > 0) {
+                    const progress = Math.round((downloadedSize / totalSize) * 100);
+                    // Throttling: send progress only once per integer %
+                    event.sender.send('update-progress', progress);
+                }
+            });
+
+            response.on('end', () => {
+                file.end();
+                console.log('[Update] Download complete.');
+                event.sender.send('update-ready');
+            });
+        });
+
+        request.on('error', (err) => {
+            console.error('[Update] Request error:', err);
+            event.sender.send('update-error', err.message);
+        });
+
+        return { success: true };
+    } catch (error: any) {
+        console.error('[Update] Exception:', error);
+        return { success: false, error: error.message };
+    }
+  })
+
+  // [v1.6.0] Execute the downloaded installer and quit
+  ipcMain.handle('install-app-update', async () => {
+    const tempPath = join(app.getPath('temp'), 'DoulGet_Update.exe');
+    
+    if (!fs.existsSync(tempPath)) {
+        return { success: false, error: 'Fichier installeur introuvable.' };
+    }
+
+    console.log('[Update] Launching installer and quitting...');
+    
+    // Launch installer detached and quit
+    const { spawn } = require('child_process');
+    spawn(tempPath, [], {
+        detached: true,
+        stdio: 'ignore'
+    }).unref();
+
+    app.quit();
+    return { success: true };
   })
 
   ipcMain.handle('admin-set-latest-version', async (_event, password, newVersion, downloadUrl) => {
@@ -5027,6 +5323,53 @@ app.whenReady().then(() => {
     }
     
     return { success: true };
+  })
+
+  // [v1.6.1] FEEDBACK SYSTEM: Submit a rating + comment
+  ipcMain.handle('submit-feedback', async (_event, rating: number, comment: string) => {
+    try {
+      const mid = await getMachineId();
+      const version = app.getVersion();
+      const result = await supabaseRequest('feedback', 'POST', {
+        hwid: mid,
+        rating,
+        comment: comment || null,
+        app_version: version,
+        created_at: new Date().toISOString()
+      });
+      if (result) {
+        console.log('[Feedback] Submitted successfully.');
+        return { success: true };
+      }
+      return { success: false, error: 'Supabase error' };
+    } catch (e: any) {
+      console.error('[Feedback] Error:', e);
+      return { success: false, error: e.message };
+    }
+  })
+
+  // [v1.6.1] FEEDBACK SYSTEM: Admin get all feedback
+  ipcMain.handle('admin-get-feedback', async (_event, password: string) => {
+    if (!checkAdminPassword(password)) {
+      return { success: false, error: 'Mot de passe admin incorrect.' };
+    }
+    const data = await supabaseRequest('feedback?select=*&order=created_at.desc', 'GET');
+    if (data && Array.isArray(data)) {
+      return { success: true, feedback: data };
+    }
+    return { success: false, error: 'Impossible de récupérer les avis.' };
+  })
+
+  // [v1.6.1] FEEDBACK SYSTEM: Check if HWID already submitted feedback
+  ipcMain.handle('get-feedback-status', async () => {
+    try {
+      const mid = await getMachineId();
+      const data = await supabaseRequest(`feedback?hwid=eq.${encodeURIComponent(mid)}&select=rating`, 'GET');
+      const submitted = data && Array.isArray(data) && data.length > 0;
+      return { submitted };
+    } catch {
+      return { submitted: false };
+    }
   })
 
   // [v1.9.33] Upload local Setup/Extension to Storage
@@ -5086,7 +5429,14 @@ app.whenReady().then(() => {
       const { isSocial, platform } = isSocialMediaURL(url)
       if (isSocial) {
         try {
-          const downloadPath = savePath.filePaths[0]
+          const baseDownloadPath = savePath.filePaths[0]
+          // [v1.2.9] Use subFolder logic now handled partially by prepareDownloadPath or inline here
+          const subFolder = audioOnly ? 'Audios' : 'Videos'
+          const downloadPath = join(baseDownloadPath, subFolder)
+          if (!fs.existsSync(downloadPath)) {
+             try { fs.mkdirSync(downloadPath, { recursive: true }) } catch (e) { }
+          }
+
           const trackerId = getTrackerId(url, audioOnly)
           const tracker: DownloadTracker = {
             item: null,
@@ -5109,7 +5459,14 @@ app.whenReady().then(() => {
         }
       } else {
         try {
-          const downloadPath = savePath.filePaths[0]
+          const baseDownloadPath = savePath.filePaths[0]
+          // [v1.2.9] AUTOMATIC FOLDER ORGANIZATION 📂
+          const subFolder = audioOnly ? 'Audios' : 'Videos'
+          const downloadPath = join(baseDownloadPath, subFolder)
+          if (!fs.existsSync(downloadPath)) {
+            fs.mkdirSync(downloadPath, { recursive: true })
+          }
+
           const trackerId = getTrackerId(url, audioOnly)
           const tracker: DownloadTracker = {
             item: null,
@@ -5136,6 +5493,159 @@ app.whenReady().then(() => {
   // Handler pour ignorer un téléchargement détecté
   ipcMain.on('dismiss-detected-download', () => {
     // Téléchargement ignoré - callback is intentionally empty
+  })
+
+  // [v1.2.9] LOCAL MP3 CONVERTER HANDLERS 🎵
+  ipcMain.handle('select-local-video', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Vidéos', extensions: ['mp4', 'mkv', 'avi', 'mov', 'webm', 'wmv', 'flv'] }]
+    })
+    return result.filePaths[0] || null
+  })
+
+  ipcMain.handle('local-convert-video-to-mp3', async (_event, inputPath: string) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const ffmpegPath = await ensureFfmpegAvailable()
+        if (!ffmpegPath) return reject(new Error('FFmpeg not found'))
+
+        const path = require('path')
+        const outputDir = path.dirname(inputPath)
+        
+        // [v1.2.9] AUTOMATIC FOLDER ORGANIZATION 📂
+        // If the original folder is 'Videos', we move up one level and go to 'Conversions'
+        // If not, we just create 'Conversions' inside the current folder.
+        let baseDir = outputDir;
+        if (path.basename(outputDir) === 'Videos' || path.basename(outputDir) === 'Audios') {
+          baseDir = path.dirname(outputDir);
+        }
+        const conversionDir = path.join(baseDir, 'Conversions');
+        if (!fs.existsSync(conversionDir)) {
+          fs.mkdirSync(conversionDir, { recursive: true });
+        }
+
+        const outputName = path.basename(inputPath, path.extname(inputPath)) + '.mp3'
+        const outputPath = path.join(conversionDir, outputName)
+
+        const { spawn } = require('child_process')
+        const ffmpeg = spawn(ffmpegPath, [
+          '-i', inputPath,
+          '-vn',
+          '-acodec', 'libmp3lame',
+          '-ab', '192k',
+          '-ar', '44100',
+          '-y',
+          outputPath
+        ])
+
+        let duration = 0
+        ffmpeg.stderr.on('data', (data: Buffer) => {
+          const text = data.toString()
+          // Extract duration
+          const durationMatch = text.match(/Duration: (\d+):(\d+):(\d+)/)
+          if (durationMatch) {
+            duration = parseInt(durationMatch[1]) * 3600 + parseInt(durationMatch[2]) * 60 + parseInt(durationMatch[3])
+          }
+          // Extract time and progress
+          const timeMatch = text.match(/time=(\d+):(\d+):(\d+)/)
+          if (timeMatch && duration > 0) {
+            const currentTime = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3])
+            const progress = Math.min(Math.round((currentTime / duration) * 100), 99)
+            BrowserWindow.getAllWindows()[0]?.webContents.send('conversion-progress', { progress, filename: outputName })
+          }
+        })
+
+        ffmpeg.on('close', (code: number) => {
+          if (code === 0) {
+            resolve({ success: true, path: outputPath })
+          } else {
+            reject(new Error(`FFmpeg exited with code ${code}`))
+          }
+        })
+
+        ffmpeg.on('error', (err: any) => reject(err))
+      } catch (err) {
+        reject(err)
+      }
+    })
+  })
+
+  ipcMain.handle('local-compress-video', async (_event, inputPath: string, quality: 'low' | 'medium' | 'whatsapp' = 'whatsapp') => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const ffmpegPath = await ensureFfmpegAvailable()
+        if (!ffmpegPath) return reject(new Error('FFmpeg not found'))
+
+        const path = require('path')
+        const outputDir = path.dirname(inputPath)
+        
+        // [v1.3.0] AUTOMATIC FOLDER ORGANIZATION 📂
+        let baseDir = outputDir;
+        if (path.basename(outputDir) === 'Videos' || path.basename(outputDir) === 'Audios' || path.basename(outputDir) === 'Conversions') {
+          baseDir = path.dirname(outputDir);
+        }
+        const compressedDir = path.join(baseDir, 'Conversions', 'Compressed');
+        if (!fs.existsSync(compressedDir)) {
+          fs.mkdirSync(compressedDir, { recursive: true });
+        }
+
+        const extension = path.extname(inputPath)
+        const outputName = path.basename(inputPath, extension) + '_compressed' + (quality === 'whatsapp' ? '_wa' : '') + '.mp4'
+        const outputPath = path.join(compressedDir, outputName)
+
+        // Compression Settings (H.264)
+        let ffmpegArgs = ['-i', inputPath]
+        
+        if (quality === 'whatsapp') {
+          // Optimized for WhatsApp (target 720p, good CRF)
+          ffmpegArgs.push(
+            '-vcodec', 'libx264',
+            '-crf', '28',
+            '-preset', 'faster',
+            '-vf', "scale='min(1280,iw)':-2", // Max 720p width
+            '-acodec', 'aac',
+            '-b:a', '128k'
+          )
+        } else if (quality === 'low') {
+          ffmpegArgs.push('-vcodec', 'libx264', '-crf', '32', '-preset', 'veryfast')
+        } else {
+          ffmpegArgs.push('-vcodec', 'libx264', '-crf', '24', '-preset', 'medium')
+        }
+
+        ffmpegArgs.push('-y', outputPath)
+
+        const { spawn } = require('child_process')
+        const ffmpeg = spawn(ffmpegPath, ffmpegArgs)
+
+        let duration = 0
+        ffmpeg.stderr.on('data', (data: Buffer) => {
+          const text = data.toString()
+          const durationMatch = text.match(/Duration: (\d+):(\d+):(\d+)/)
+          if (durationMatch) {
+            duration = parseInt(durationMatch[1]) * 3600 + parseInt(durationMatch[2]) * 60 + parseInt(durationMatch[3])
+          }
+          const timeMatch = text.match(/time=(\d+):(\d+):(\d+)/)
+          if (timeMatch && duration > 0) {
+            const currentTime = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3])
+            const progress = Math.min(Math.round((currentTime / duration) * 100), 99)
+            BrowserWindow.getAllWindows()[0]?.webContents.send('compression-progress', { progress, filename: outputName })
+          }
+        })
+
+        ffmpeg.on('close', (code: number) => {
+          if (code === 0) {
+            resolve({ success: true, path: outputPath, filename: outputName })
+          } else {
+            reject(new Error(`FFmpeg exited with code ${code}`))
+          }
+        })
+
+        ffmpeg.on('error', (err: any) => reject(err))
+      } catch (err) {
+        reject(err)
+      }
+    })
   })
 
   // Démarrer le serveur HTTP pour communiquer avec l'extension de navigateur
@@ -5165,6 +5675,126 @@ app.whenReady().then(() => {
   })
 
   // [v1.0.8] IPC Handler to get download logs
+  ipcMain.handle('get-playlist-info', async (_event, url: string) => {
+    const fetchInfo = (useFlat: boolean) => {
+      return new Promise<any>(async (resolve, reject) => {
+        try {
+          const ytDlpPath = ensureYtDlpAvailable()
+          if (!ytDlpPath) return reject(new Error('yt-dlp not found'))
+
+          const args = [
+            '--dump-single-json',
+            '--no-warnings',
+            '--no-check-certificates',
+            '--no-playlist', // used when not useFlat but we handle it manually
+            url
+          ]
+          
+          if (useFlat) {
+            args[args.indexOf('--no-playlist')] = '--flat-playlist'
+          }
+
+          const cp = spawn(ytDlpPath, args)
+          let stdout = ''
+          let stderr = ''
+
+          cp.stdout.on('data', (data) => (stdout += data.toString()))
+          cp.stderr.on('data', (data) => (stderr += data.toString()))
+
+          cp.on('close', (code) => {
+            if (code === 0) {
+              try {
+                const data = JSON.parse(stdout)
+                
+                // If it's a playlist
+                if (data._type === 'playlist' || data.entries) {
+                  const entries = (data.entries || []).map((entry: any) => ({
+                    id: entry.id,
+                    url: entry.url || (entry.id ? `https://www.youtube.com/watch?v=${entry.id}` : url),
+                    title: entry.title || 'Sans titre',
+                    duration: entry.duration
+                  }))
+                  return resolve({
+                    title: data.title || 'Playlist',
+                    entries: entries
+                  })
+                }
+
+                // If it's a single video
+                resolve({
+                  title: data.title || 'Vidéo',
+                  entries: [{
+                    id: data.id || 'video',
+                    url: url,
+                    title: data.title || 'Vidéo seule',
+                    duration: data.duration
+                  }]
+                })
+              } catch (e) {
+                reject(new Error('Failed to parse info'))
+              }
+            } else {
+              reject(stderr || `Exit ${code}`)
+            }
+          })
+        } catch (err) {
+          reject(err)
+        }
+      })
+    }
+
+    try {
+      // First attempt: Fast flat-playlist
+      return await fetchInfo(true)
+    } catch (e: any) {
+      console.log('[get-playlist-info] Flat-playlist failed, trying direct extraction:', e)
+      // Second attempt: Full extraction (works for single videos or sites without playlist support)
+      try {
+        return await fetchInfo(false)
+      } catch (e2: any) {
+        throw new Error(e2.toString())
+      }
+    }
+  })
+
+  ipcMain.on('batch-add-to-queue', async (event, { items, playlistTitle, audioOnly, headers }: { items: any[], playlistTitle?: string, audioOnly: boolean, headers?: Record<string, string> }) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return
+
+    const baseDownloadPath = appSettings.downloadPath
+    const subFolder = audioOnly ? 'Audios' : 'Videos'
+    
+    // Create playlist subfolder if title provided
+    let finalPath = join(baseDownloadPath, subFolder)
+    if (playlistTitle) {
+      finalPath = join(finalPath, sanitizeStringForFilename(playlistTitle))
+    }
+
+    if (!fs.existsSync(finalPath)) {
+      try { fs.mkdirSync(finalPath, { recursive: true }) } catch (e) { }
+    }
+
+    // Add each item to queue
+    items.forEach((item) => {
+      addToDownloadQueue(
+        item.url,
+        win,
+        finalPath,
+        item.title,
+        undefined, // type
+        undefined, // mimeType
+        2, // Normal priority for batch
+        headers || {}, // [v1.5.1] Forward headers from external batch (Lok-lok fix)
+        audioOnly
+      )
+    })
+
+    win.webContents.send('notification', {
+      title: 'Batch Downloader',
+      body: `${items.length} vidéos ajoutées à la file d'attente.`
+    })
+  })
+
   ipcMain.handle('get-download-logs', (_event, url: string, audioOnly: boolean = false) => {
     const trackerId = getTrackerId(url, audioOnly)
     const tracker = activeDownloads.get(trackerId)
@@ -5193,8 +5823,8 @@ function saveActiveDownloads() {
         tracker.url &&
         tracker.filename
       )
-      .map(([url, tracker]) => ({
-        url,
+      .map(([id, tracker]) => ({
+        url: tracker.url || id.split('|')[0], // [v1.2.9] FIX: Use REAL URL from tracker instead of Map Key
         filename: tracker.filename || 'download',
         savePath: tracker.savePath || appSettings.downloadPath,
         receivedBytes: tracker.lastBytes || 0,
@@ -5202,7 +5832,7 @@ function saveActiveDownloads() {
         headers: tracker.headers || {},
         strategy: tracker.strategy || 'direct',
         audioOnly: !!tracker.audioOnly, // [v1.7.0] Persist format
-        timestamp: Date.now()
+        timestamp: tracker.startTime || Date.now()
       }))
 
     fs.writeFileSync(persistencePath, JSON.stringify({ downloads: downloadsToSave }, null, 2), 'utf-8')
@@ -5259,6 +5889,14 @@ function restoreActiveDownloads() {
     console.log(`[PERSISTENCE] Attempting to restore ${data.downloads.length} downloads`)
 
     data.downloads.forEach((download: any) => {
+      const trackerId = getTrackerId(download.url, !!download.audioOnly)
+      
+      // [v1.2.9] ANTI-DUPLICATE CHECK: Skip if already in memory
+      if (activeDownloads.has(trackerId)) {
+        console.log(`[PERSISTENCE] Skipping duplicate: ${download.filename}`)
+        return
+      }
+
       // Check if partial file exists
       const possibleFilePaths = [
         join(download.savePath, download.filename),
@@ -5346,14 +5984,14 @@ function restoreActiveDownloads() {
           lastBytes: existingFileSize, // Actual bytes on disk (0 if missing)
           lastTime: Date.now(),
           savePath: download.savePath,
-          filename: download.filename, // potentially updated by smart recovery
+          filename: download.filename.replace(/\.f\d+/g, '').replace(/\.f136/g, '').replace(/\.f248/g, ''), // [v1.5.5] Clean format IDs from filename
           headers: download.headers,
           strategy: download.strategy || (isYouTube ? 'yt-dlp' : 'direct'), // Fallback for legacy
           isYouTube: isYouTube,       // CRITICAL for resume logic
           totalBytes: totalBytes,
           paused: true, // Start paused
           cancelled: false,
-          lastProgress: Math.min(lastProgress || (download.receivedBytes && download.totalBytes ? Math.round((download.receivedBytes / download.totalBytes) * 100) : 0), 99),
+          lastProgress: lastProgress, // Use actual calculation
           statusMessage: existingFilePath ? (isFfmpegAvailable() ? 'Waiting for resume...' : 'Waiting for resume (Fixed mode - No FFmpeg)') : 'Interrupted (File missing)',
           audioOnly: !!download.audioOnly // [v1.7.0] Restore from JSON
         }

@@ -1,5 +1,6 @@
-import { X, ShieldAlert, ShieldCheck, Key, FileText, Clipboard, CheckCircle2, AlertCircle, Cloud, RefreshCw, UploadCloud, Package, Search } from 'lucide-react';
+import { X, ShieldAlert, ShieldCheck, Key, FileText, Clipboard, CheckCircle2, AlertCircle, Cloud, RefreshCw, UploadCloud, Package, Search, Star, MessageSquare } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useTranslation } from '../utils/i18n';
 
 type AdminModalProps = {
     isOpen: boolean;
@@ -10,6 +11,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     const [password, setPassword] = useState('');
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [authError, setAuthError] = useState('');
+    const { t } = useTranslation();
 
     const [targetMid, setTargetMid] = useState('');
     const [duration, setDuration] = useState('30');
@@ -18,13 +20,15 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
 
     const [result, setResult] = useState<{ type: 'single' | 'bulk', data: string | string[] } | null>(null);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-    const [activeTab, setActiveTab] = useState<'generation' | 'cloud' | 'updates'>('generation');
+    const [activeTab, setActiveTab] = useState<'generation' | 'cloud' | 'updates' | 'feedback'>('generation');
     const [newVersion, setNewVersion] = useState('');
     const [newUpdateUrl, setNewUpdateUrl] = useState('');
     const [cloudLicenses, setCloudLicenses] = useState<any[]>([]);
     const [isLoadingCloud, setIsLoadingCloud] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const [searchCloud, setSearchCloud] = useState('');
+    const [feedbackList, setFeedbackList] = useState<any[]>([]);
+    const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
 
 
     const handleAuth = async () => {
@@ -33,7 +37,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
             setIsAuthenticated(true);
             setAuthError('');
         } else {
-            setAuthError('Mot de passe incorrect.');
+            setAuthError(t.admin.wrongPassword);
         }
     };
 
@@ -45,6 +49,22 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
         }
         return () => clearInterval(interval);
     }, [activeTab, isAuthenticated]);
+
+    const fetchFeedback = async () => {
+        setIsLoadingFeedback(true);
+        try {
+            const res = await window.api.adminGetFeedback(password || '');
+            if (res.success && res.feedback) {
+                setFeedbackList(res.feedback);
+            } else if (!res.success) {
+                setMessage({ type: 'error', text: res.error || 'Erreur lors de la récupération des avis.' });
+            }
+        } catch (e) {
+            setMessage({ type: 'error', text: 'Erreur technique lors de la récupération.' });
+        } finally {
+            setIsLoadingFeedback(false);
+        }
+    };
 
 
     const handleGenerateSingle = async () => {
@@ -116,7 +136,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     };
 
     const handleResetLicense = async () => {
-        if (!window.confirm('Voulez-vous vraiment réinitialiser la licence de CE PC ? Cela vous permettra d\'activer une nouvelle clé.')) return;
+        if (!window.confirm(t.admin.confirmReset)) return;
 
         try {
             const res = await window.api.adminResetLicense(password);
@@ -183,7 +203,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     };
 
     const handleDeleteLicenseCloud = async (mid: string) => {
-        if (!window.confirm(`⚠️ ATTENTION : Voulez-vous supprimer TOTALEMENT cette machine (${mid}) de votre base de données ? Cette action est irréversible.`)) return;
+        if (!window.confirm(`${t.admin.confirmDelete} (${mid})`)) return;
 
         try {
             const res = await window.api.adminDeleteLicenseCloud(password, mid);
@@ -259,13 +279,13 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                 {!isAuthenticated ? (
                     <div className="space-y-6">
                         <p className="text-sm text-blue-200/70 text-center italic">
-                            Accès restreint. Veuillez entrer le Mot de Passe Maître.
+                            {t.admin.accessRestricted}
                         </p>
                         <div className="relative">
                             <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-500" />
                             <input
                                 type="password"
-                                placeholder="Mot de passe"
+                                placeholder={t.admin.password}
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAuth()}
@@ -282,7 +302,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                             onClick={handleAuth}
                             className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all shadow-lg shadow-blue-900/20"
                         >
-                            DÉVERROUILLER
+                            {t.admin.unlock}
                         </button>
                     </div>
                 ) : (
@@ -294,21 +314,28 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                 className={`flex-1 py-1.5 text-xs font-bold rounded transition-all ${activeTab === 'generation' ? 'bg-blue-600 text-white shadow-lg' : 'text-blue-300/50 hover:text-blue-300'}`}
                             >
                                 <Key className="w-3.5 h-3.5 inline mr-2" />
-                                Génération
+                                {t.admin.tabGeneration}
                             </button>
                             <button
                                 onClick={() => { setActiveTab('cloud'); fetchCloudLicenses(); }}
                                 className={`flex-1 py-1.5 text-xs font-bold rounded transition-all ${activeTab === 'cloud' ? 'bg-blue-600 text-white shadow-lg' : 'text-blue-300/50 hover:text-blue-300'}`}
                             >
                                 <Cloud className="w-3.5 h-3.5 inline mr-2" />
-                                Gestion Cloud
+                                {t.admin.tabCloud}
                             </button>
                             <button
                                 onClick={() => setActiveTab('updates')}
                                 className={`flex-1 py-1.5 text-xs font-bold rounded transition-all ${activeTab === 'updates' ? 'bg-blue-600 text-white shadow-lg' : 'text-blue-300/50 hover:text-blue-300'}`}
                             >
                                 <RefreshCw className="w-3.5 h-3.5 inline mr-2" />
-                                Mise à Jour
+                                {t.admin.tabUpdates}
+                            </button>
+                            <button
+                                onClick={() => { setActiveTab('feedback'); fetchFeedback(); }}
+                                className={`flex-1 py-1.5 text-xs font-bold rounded transition-all ${activeTab === 'feedback' ? 'bg-yellow-600 text-white shadow-lg' : 'text-yellow-300/50 hover:text-yellow-300'}`}
+                            >
+                                <Star className="w-3.5 h-3.5 inline mr-2" />
+                                {t.admin.tabFeedback}
                             </button>
                         </div>
 
@@ -316,20 +343,22 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                             <div className="space-y-8 animate-in fade-in duration-300">
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="col-span-2 space-y-2">
-                                        <label className="text-xs font-semibold text-blue-300 uppercase tracking-wider">Durée de validité</label>
+                                        <label className="text-xs font-semibold text-blue-300 uppercase tracking-wider">{t.admin.duration}</label>
                                         <select
                                             value={duration}
                                             onChange={(e) => setDuration(e.target.value)}
                                             className="w-full px-3 py-2 bg-black/40 text-blue-100 border border-blue-500/20 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                                         >
-                                            <option value="30">1 Mois (Abonnement Standard)</option>
-                                            <option value="custom">Date Personnalisée...</option>
+                                            <option value="30">{t.admin.month1}</option>
+                                            <option value="365">{t.admin.year1}</option>
+                                            <option value="permanent">{t.admin.lifetime}</option>
+                                            <option value="custom">{t.admin.customDate}</option>
                                         </select>
                                     </div>
 
                                     {duration === 'custom' && (
                                         <div className="col-span-2 space-y-2 animate-in slide-in-from-top-1 duration-200">
-                                            <label className="text-xs font-semibold text-blue-300 uppercase tracking-wider">Date & Heure d'expiration</label>
+                                            <label className="text-xs font-semibold text-blue-300 uppercase tracking-wider">{t.admin.customDate}</label>
                                             <input
                                                 type="datetime-local"
                                                 value={customDate}
@@ -340,10 +369,10 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                     )}
 
                                     <div className="space-y-2 p-4 bg-white/5 rounded-lg border border-white/10">
-                                        <h4 className="text-sm font-bold text-white mb-2">Clé Unique</h4>
+                                        <h4 className="text-sm font-bold text-white mb-2">{t.admin.singleKey}</h4>
                                         <input
                                             type="text"
-                                            placeholder="HWID Client"
+                                            placeholder={t.admin.hwidClient}
                                             value={targetMid}
                                             onChange={(e) => setTargetMid(e.target.value)}
                                             className="w-full px-2 py-1.5 text-xs bg-black/40 text-blue-100 border border-white/10 rounded mb-2"
@@ -352,14 +381,14 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                             onClick={handleGenerateSingle}
                                             className="w-full py-2 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-xs font-bold rounded transition-all border border-blue-600/30"
                                         >
-                                            GÉNÉRER
+                                            {t.admin.generate}
                                         </button>
                                     </div>
 
                                     <div className="space-y-2 p-4 bg-white/5 rounded-lg border border-white/10">
-                                        <h4 className="text-sm font-bold text-white mb-2">Génération en Masse</h4>
+                                        <h4 className="text-sm font-bold text-white mb-2">{t.admin.bulkGeneration}</h4>
                                         <div className="flex items-center gap-2 mb-2">
-                                            <span className="text-xs text-muted-foreground whitespace-nowrap">Nombre :</span>
+                                            <span className="text-xs text-muted-foreground whitespace-nowrap">{t.admin.count}</span>
                                             <input
                                                 type="number"
                                                 min="1"
@@ -381,14 +410,14 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                     <div className="col-span-2 space-y-2 pt-4 border-t border-white/10">
                                         <div className="flex items-center justify-between">
                                             <div className="flex flex-col">
-                                                <span className="text-xs font-bold text-red-400 uppercase tracking-wider">Maintenance locale</span>
-                                                <span className="text-[10px] text-muted-foreground">Réinitialiser l'activation de cet ordinateur</span>
+                                                <span className="text-xs font-bold text-red-400 uppercase tracking-wider">{t.admin.maintenance}</span>
+                                                <span className="text-[10px] text-muted-foreground">{t.admin.maintenanceDesc}</span>
                                             </div>
                                             <button
                                                 onClick={handleResetLicense}
                                                 className="px-4 py-2 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white text-[10px] font-bold rounded transition-all border border-red-600/30"
                                             >
-                                                RÉINITIALISER CE PC
+                                                {t.admin.resetPc}
                                             </button>
                                         </div>
                                     </div>
@@ -422,19 +451,19 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                 <div className="flex justify-between items-center bg-blue-500/5 border border-blue-500/10 p-3 rounded-lg">
                                     <div className="flex gap-6 items-center">
                                         <div className="flex flex-col">
-                                            <span className="text-[10px] text-blue-300/50 uppercase font-bold tracking-widest">Abonnés</span>
+                                            <span className="text-[10px] text-blue-300/50 uppercase font-bold tracking-widest">{t.admin.subscribers}</span>
                                             <span className="text-xl font-black text-white">{cloudLicenses.length}</span>
                                         </div>
                                         <div className="h-8 w-px bg-blue-500/10" />
                                         <div className="flex flex-col">
-                                            <span className="text-[10px] text-green-400/50 uppercase font-bold tracking-widest">En Ligne</span>
+                                            <span className="text-[10px] text-green-400/50 uppercase font-bold tracking-widest">{t.admin.online}</span>
                                             <span className="text-xl font-black text-green-400">
                                                 {cloudLicenses.filter(l => l.last_seen && (Date.now() - new Date(l.last_seen).getTime() < 15 * 60 * 1000)).length}
                                             </span>
                                         </div>
                                         <div className="h-8 w-px bg-blue-500/10" />
                                         <div className="flex flex-col">
-                                            <span className="text-[10px] text-red-500/50 uppercase font-bold tracking-widest">Bannis</span>
+                                            <span className="text-[10px] text-red-500/50 uppercase font-bold tracking-widest">{t.admin.banned}</span>
                                             <span className="text-xl font-black text-red-500">{cloudLicenses.filter(l => l.is_blocked).length}</span>
                                         </div>
                                     </div>
@@ -452,7 +481,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-400/50" />
                                     <input
                                         type="text"
-                                        placeholder="Rechercher par HWID ou par clé d'origine..."
+                                        placeholder={t.admin.searchPlaceholder}
                                         value={searchCloud}
                                         onChange={(e) => setSearchCloud(e.target.value)}
                                         className="w-full pl-9 pr-4 py-2 bg-black/40 text-[10px] text-blue-100 border border-blue-500/20 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500/50"
@@ -461,16 +490,16 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
 
                                 <div className="bg-black/60 border border-blue-500/20 rounded-md overflow-hidden flex flex-col h-96">
                                     <div className="grid grid-cols-5 gap-2 p-2 bg-blue-900/20 border-b border-blue-500/20 text-[10px] font-bold text-blue-300 uppercase">
-                                        <span>HWID</span>
-                                        <span>Clé Origine</span>
-                                        <span>Activation</span>
-                                        <span>Status</span>
-                                        <span className="text-right">Action</span>
+                                        <span>{t.admin.hwid}</span>
+                                        <span>{t.admin.originalKey}</span>
+                                        <span>{t.admin.activation}</span>
+                                        <span>{t.admin.statusLabel}</span>
+                                        <span className="text-right">{t.admin.actionLabel}</span>
                                     </div>
                                     <div className="flex-1 overflow-y-auto custom-scrollbar">
                                         {cloudLicenses.length === 0 ? (
                                             <div className="p-8 text-center text-xs text-muted-foreground italic">
-                                                Aucun utilisateur enregistré.
+                                                {t.admin.noUsers}
                                             </div>
                                         ) : (
                                             cloudLicenses
@@ -495,16 +524,16 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                                             </div>
                                                             <span className="text-[9px] text-blue-200 truncate" title={lic.original_key || 'Direct'}>{lic.original_key || 'Direct'}</span>
                                                             <div className="flex flex-col">
-                                                                <span className="text-[7px] text-blue-300/50 uppercase font-bold">Activé le</span>
+                                                                <span className="text-[7px] text-blue-300/50 uppercase font-bold">{t.admin.activatedOn}</span>
                                                                 <span className="text-[9px] text-blue-400 font-medium">{activatedAt}</span>
                                                             </div>
                                                             <span className="flex items-center gap-1">
                                                                 {lic.is_blocked ? (
-                                                                    <span className="px-1.5 py-0.5 bg-red-500/20 text-red-500 text-[8px] font-bold rounded">BAN</span>
+                                                                    <span className="px-1.5 py-0.5 bg-red-500/20 text-red-500 text-[8px] font-bold rounded">{t.admin.statusBan}</span>
                                                                 ) : lic.license_key ? (
-                                                                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-500 text-[8px] font-bold rounded">ACTIF</span>
+                                                                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-500 text-[8px] font-bold rounded">{t.admin.statusActive}</span>
                                                                 ) : (
-                                                                    <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-500 text-[8px] font-bold rounded">ESSAI</span>
+                                                                    <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-500 text-[8px] font-bold rounded">{t.admin.statusTrial}</span>
                                                                 )}
                                                             </span>
                                                             <div className="flex justify-end gap-1">
@@ -544,7 +573,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                 <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
                                     <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
                                         <RefreshCw className="w-4 h-4 text-blue-400 animate-spin-slow" />
-                                        Publier une nouvelle version
+                                        {t.admin.publishVersion}
                                     </h4>
 
                                     <div className="grid grid-cols-2 gap-4">
@@ -556,8 +585,8 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                         >
                                             <UploadCloud className="w-8 h-8 text-blue-400" />
                                             <div className="text-center">
-                                                <p className="text-[10px] font-bold text-white uppercase">Setup (.exe)</p>
-                                                <p className="text-[9px] text-blue-300/50">Cliquez ou glissez ici</p>
+                                                <p className="text-[10px] font-bold text-white uppercase">{t.admin.setupExe}</p>
+                                                <p className="text-[9px] text-blue-300/50">{t.admin.clickOrDrag}</p>
                                             </div>
                                         </div>
 
@@ -569,15 +598,15 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                         >
                                             <Package className="w-8 h-8 text-indigo-400" />
                                             <div className="text-center">
-                                                <p className="text-[10px] font-bold text-white uppercase">Extension (.zip)</p>
-                                                <p className="text-[9px] text-indigo-300/50">Cliquez ou glissez ici</p>
+                                                <p className="text-[10px] font-bold text-white uppercase">{t.admin.extensionZip}</p>
+                                                <p className="text-[9px] text-indigo-300/50">{t.admin.clickOrDrag}</p>
                                             </div>
                                         </div>
                                     </div>
 
                                     <div className="space-y-4 pt-2">
                                         <div className="space-y-2">
-                                            <label className="text-[10px] font-bold text-blue-300 uppercase">Numéro de Version (ex: 1.2.9)</label>
+                                            <label className="text-[10px] font-bold text-blue-300 uppercase">{t.admin.versionNumber}</label>
                                             <input
                                                 type="text"
                                                 value={newVersion}
@@ -588,7 +617,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                         </div>
 
                                         <div className="space-y-2">
-                                            <label className="text-[10px] font-bold text-blue-300 uppercase">Lien Direct ou Public URL</label>
+                                            <label className="text-[10px] font-bold text-blue-300 uppercase">{t.admin.directLink}</label>
                                             <input
                                                 type="text"
                                                 value={newUpdateUrl}
@@ -603,13 +632,81 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                             disabled={isUploading}
                                             className={`w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all shadow-lg text-xs ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         >
-                                            {isUploading ? 'UPLOAD EN COURS...' : 'DIFFUSER LA MISE À JOUR'}
+                                            {isUploading ? t.admin.uploading : t.admin.publishUpdate}
                                         </button>
                                     </div>
 
                                     <p className="mt-4 text-[10px] text-blue-300/50 italic text-center">
-                                        Note: Cette action affichera une notification immédiate à tous les clients utilisant une version différente.
+                                        {t.admin.publishNote}
                                     </p>
+                                </div>
+                            </div>
+                        ) : activeTab === 'feedback' ? (
+                            <div className="space-y-4 animate-in fade-in duration-300">
+                                {/* Stats */}
+                                <div className="flex justify-between items-center bg-yellow-500/5 border border-yellow-500/10 p-3 rounded-lg">
+                                    <div className="flex gap-6 items-center">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-yellow-300/50 uppercase font-bold tracking-widest">{t.admin.totalFeedback}</span>
+                                            <span className="text-xl font-black text-white">{feedbackList.length}</span>
+                                        </div>
+                                        <div className="h-8 w-px bg-yellow-500/10" />
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-yellow-300/50 uppercase font-bold tracking-widest">{t.admin.avgRating}</span>
+                                            <span className="text-xl font-black text-yellow-400">
+                                                {feedbackList.length > 0 ? (feedbackList.reduce((acc, f) => acc + f.rating, 0) / feedbackList.length).toFixed(1) : '-'}
+                                                <span className="text-sm"> / 5</span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={fetchFeedback}
+                                        className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 text-[10px] font-bold rounded transition-all border border-yellow-500/20"
+                                    >
+                                        <RefreshCw className={`w-3 h-3 ${isLoadingFeedback ? 'animate-spin' : ''}`} />
+                                        RAFRAÎCHIR
+                                    </button>
+                                </div>
+
+                                {/* List */}
+                                <div className="bg-black/60 border border-yellow-500/20 rounded-md overflow-hidden flex flex-col h-72">
+                                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                        {feedbackList.length === 0 ? (
+                                            <div className="p-8 text-center text-xs text-muted-foreground italic">
+                                                {t.admin.noFeedback}
+                                            </div>
+                                        ) : (
+                                            feedbackList.map((fb, i) => (
+                                                <div key={i} className="p-3 border-b border-white/5 hover:bg-white/5 transition-colors">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <div className="flex items-center gap-1">
+                                                            {[1, 2, 3, 4, 5].map(s => (
+                                                                <Star
+                                                                    key={s}
+                                                                    className={`w-3.5 h-3.5 ${s <= fb.rating ? 'text-yellow-400 fill-yellow-400' : 'text-white/15'}`}
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                        <span className="text-[9px] text-muted-foreground">
+                                                            {fb.created_at ? new Date(fb.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'N/A'}
+                                                        </span>
+                                                    </div>
+                                                    {fb.comment && (
+                                                        <p className="text-xs text-blue-100/80 mt-1 flex items-start gap-1.5">
+                                                            <MessageSquare className="w-3 h-3 mt-0.5 shrink-0 text-blue-400/50" />
+                                                            {fb.comment}
+                                                        </p>
+                                                    )}
+                                                    <div className="flex items-center justify-between mt-1.5">
+                                                        <span className="text-[8px] font-mono text-blue-400/40" title={fb.hwid}>
+                                                            HWID: {fb.hwid?.substring(0, 12)}...
+                                                        </span>
+                                                        <span className="text-[8px] text-blue-400/30">v{fb.app_version || '?'}</span>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         ) : null}
@@ -623,13 +720,13 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
 
                         <div className="pt-4 border-t border-white/5 flex justify-between items-center">
                             <p className="text-[10px] text-muted-foreground italic max-w-xs">
-                                Note : Les clés générées en masse sont liées à un ID générique et se lieront à l'utilisateur lors de l'activation.
+                                {t.admin.bulkNote}
                             </p>
                             <button
                                 onClick={() => setIsAuthenticated(false)}
                                 className="text-xs text-muted-foreground hover:text-white underline"
                             >
-                                Se déconnecter
+                                {t.admin.logout}
                             </button>
                         </div>
                     </div>

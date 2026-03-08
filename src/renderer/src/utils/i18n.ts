@@ -10,6 +10,7 @@ export interface Translations {
     queued: string;
     trash: string;
     settings: string;
+    about: string;
   };
   // Settings
   settings: {
@@ -124,6 +125,193 @@ export interface Translations {
     download: string;
     unknown: string;
   };
+  // Sidebar extras
+  sidebarExtra: {
+    converter: string;
+    compressor: string;
+    batch: string;
+    feedback: string;
+    updateAvailable: string;
+    updateDownloading: string;
+    updateReady: string;
+    updateError: string;
+    navGroup: string;
+    toolsGroup: string;
+  };
+  // Feedback Modal
+  feedback: {
+    title: string;
+    subtitle: string;
+    commentLabel: string;
+    commentPlaceholder: string;
+    sendError: string;
+    later: string;
+    send: string;
+    thankYou: string;
+    thankYouSub: string;
+    bad: string;
+    okay: string;
+    good: string;
+    veryGood: string;
+    excellent: string;
+  };
+  // License Gate
+  license: {
+    title: string;
+    subtitle: string;
+    placeholder: string;
+    activate: string;
+    activating: string;
+    machineId: string;
+    copy: string;
+    copied: string;
+  };
+  // Admin Modal
+  admin: {
+    title: string;
+    accessRestricted: string;
+    password: string;
+    unlock: string;
+    wrongPassword: string;
+    tabGeneration: string;
+    tabCloud: string;
+    tabUpdates: string;
+    tabFeedback: string;
+    duration: string;
+    month1: string;
+    year1: string;
+    lifetime: string;
+    customDate: string;
+    singleKey: string;
+    hwidClient: string;
+    generate: string;
+    bulkGeneration: string;
+    count: string;
+    generateKeys: string;
+    maintenance: string;
+    maintenanceDesc: string;
+    resetPc: string;
+    results: string;
+    copyClip: string;
+    exportTxt: string;
+    subscribers: string;
+    online: string;
+    banned: string;
+    refresh: string;
+    searchPlaceholder: string;
+    hwid: string;
+    originalKey: string;
+    activation: string;
+    statusLabel: string;
+    actionLabel: string;
+    noUsers: string;
+    activatedOn: string;
+    statusActive: string;
+    statusBan: string;
+    statusTrial: string;
+    publishVersion: string;
+    versionNumber: string;
+    directLink: string;
+    publishUpdate: string;
+    uploading: string;
+    publishNote: string;
+    setupExe: string;
+    extensionZip: string;
+    clickOrDrag: string;
+    totalFeedback: string;
+    avgRating: string;
+    noFeedback: string;
+    logout: string;
+    bulkNote: string;
+    confirmReset: string;
+    confirmDelete: string;
+  };
+  // MP3 Converter
+  converter: {
+    title: string;
+    subtitle: string;
+    selectVideo: string;
+    videoSelected: string;
+    chooseVideo: string;
+    startBtn: string;
+    converting: string;
+    convertingSub: string;
+    success: string;
+    successSub: string;
+    anotherBtn: string;
+    error: string;
+    retryBtn: string;
+    failed: string;
+  };
+  // Video Compressor
+  compressor: {
+    title: string;
+    subtitle: string;
+    selectVideo: string;
+    videoSelected: string;
+    chooseVideo: string;
+    qualityLabel: string;
+    qLow: string;
+    qLowDesc: string;
+    qMed: string;
+    qMedDesc: string;
+    qWhatsapp: string;
+    qWhatsappDesc: string;
+    startBtn: string;
+    compressing: string;
+    compressingSub: string;
+    success: string;
+    successSub: string;
+    saveLocation: string;
+    anotherBtn: string;
+    error: string;
+    retryBtn: string;
+    failed: string;
+  };
+  // Batch Download
+  batch: {
+    title: string;
+    subtitle: string;
+    inputLabel: string;
+    inputPlaceholder: string;
+    fetch: string;
+    fetching: string;
+    fetchingSub: string;
+    fetchBtn: string;
+    selectedCount: string;
+    selectAll: string;
+    deselectAll: string;
+    videoMode: string;
+    audioMode: string;
+    startBtn: string;
+    successTitle: string;
+    successSub: string;
+    addingTitle: string;
+    addingSub: string;
+    errorFetch: string;
+    items: string;
+  };
+  // About Modal
+  about: {
+    description: string;
+    developer: string;
+    role: string;
+    features: string;
+    copyright: string;
+    licenseLabel: string;
+    feature1: string;
+    feature2: string;
+    feature3: string;
+    feature4: string;
+    feature5: string;
+    feature6: string;
+    feature7: string;
+    feature8: string;
+    feature9: string;
+    feature10: string;
+    feature11: string;
+    feature12: string;
+  };
 }
 
 const translations: Record<Language, Translations> = {
@@ -135,6 +323,7 @@ const translations: Record<Language, Translations> = {
       queued: 'En attente',
       trash: 'Corbeille',
       settings: 'Paramètres',
+      about: 'À propos',
     },
     settings: {
       title: 'Paramètres',
@@ -241,6 +430,185 @@ const translations: Record<Language, Translations> = {
       download: 'Télécharger',
       unknown: 'Taille inconnue',
     },
+    sidebarExtra: {
+      converter: 'Convertisseur MP3',
+      compressor: 'Compresseur Vidéo',
+      batch: 'Téléchargement Groupé',
+      feedback: 'Donner votre avis',
+      updateAvailable: 'MAJ DISPONIBLE · Cliquez pour installer',
+      updateDownloading: 'Téléchargement de la mise à jour...',
+      updateReady: '✅ Prêt ! Installer & Redémarrer',
+      updateError: '⚠️ Erreur de téléchargement. Réessayez.',
+      navGroup: 'Navigation',
+      toolsGroup: 'Outils & Services',
+    },
+    feedback: {
+      title: 'Votre avis nous aide !',
+      subtitle: 'Comment trouvez-vous DoulGet ?',
+      commentLabel: 'Commentaire (facultatif)',
+      commentPlaceholder: 'Partagez votre expérience, suggestions, ou problèmes rencontrés...',
+      sendError: '⚠️ Erreur lors de l\'envoi. Vérifiez votre connexion.',
+      later: 'Plus tard',
+      send: 'Envoyer',
+      thankYou: 'Merci pour votre avis !',
+      thankYouSub: 'Votre retour nous aide à améliorer DoulGet.',
+      bad: 'Mauvais',
+      okay: 'Passable',
+      good: 'Bien',
+      veryGood: 'Très bien',
+      excellent: 'Excellent !',
+    },
+    license: {
+      title: 'Activation Requise',
+      subtitle: 'Veuillez entrer votre clé de licence pour activer DoulGet.',
+      placeholder: 'Entrez votre clé de licence',
+      activate: 'ACTIVER',
+      activating: 'Activation...',
+      machineId: 'ID Machine',
+      copy: 'Copier',
+      copied: 'Copié !',
+    },
+    admin: {
+      title: 'Administration Licence (SECRET)',
+      accessRestricted: 'Accès restreint. Veuillez entrer le Mot de Passe Maître.',
+      password: 'Mot de passe',
+      unlock: 'DÉVERROUILLER',
+      wrongPassword: 'Mot de passe incorrect.',
+      tabGeneration: 'Génération',
+      tabCloud: 'Gestion Cloud',
+      tabUpdates: 'Mise à Jour',
+      tabFeedback: 'Avis',
+      duration: 'Durée de validité',
+      month1: '1 Mois (Abonnement Standard)',
+      year1: '1 An (Pack Premium)',
+      lifetime: 'À Vie (Pack Illimité)',
+      customDate: 'Date Personnalisée...',
+      singleKey: 'Clé Unique',
+      hwidClient: 'HWID Client',
+      generate: 'GÉNÉRER',
+      bulkGeneration: 'Génération en Masse',
+      count: 'Nombre :',
+      generateKeys: 'GÉNÉRER {count} CLÉS',
+      maintenance: 'Maintenance locale',
+      maintenanceDesc: 'Réinitialiser l\'activation de cet ordinateur',
+      resetPc: 'RÉINITIALISER CE PC',
+      results: 'Résultats',
+      copyClip: 'Copier',
+      exportTxt: 'Exporter .txt',
+      subscribers: 'Abonnés',
+      online: 'En Ligne',
+      banned: 'Bannis',
+      refresh: 'RAFRAÎCHIR',
+      searchPlaceholder: 'Rechercher par HWID ou par clé d\'origine...',
+      hwid: 'HWID',
+      originalKey: 'Clé Origine',
+      activation: 'Activation',
+      statusLabel: 'Status',
+      actionLabel: 'Action',
+      noUsers: 'Aucun utilisateur enregistré.',
+      activatedOn: 'Activé le',
+      statusActive: 'ACTIF',
+      statusBan: 'BAN',
+      statusTrial: 'ESSAI',
+      publishVersion: 'Publier une nouvelle version',
+      versionNumber: 'Numéro de Version (ex: 1.2.9)',
+      directLink: 'Lien Direct ou Public URL',
+      publishUpdate: 'DIFFUSER LA MISE À JOUR',
+      uploading: 'UPLOAD EN COURS...',
+      publishNote: 'Note: Cette action affichera une notification immédiate à tous les clients utilisant une version différente.',
+      setupExe: 'Setup (.exe)',
+      extensionZip: 'Extension (.zip)',
+      clickOrDrag: 'Cliquez ou glissez ici',
+      totalFeedback: 'Avis Total',
+      avgRating: 'Note Moyenne',
+      noFeedback: 'Aucun avis pour le moment.',
+      logout: 'Se déconnecter',
+      bulkNote: 'Les clés générées en masse sont liées à un ID générique et se lieront à l\'utilisateur lors de l\'activation.',
+      confirmReset: 'Voulez-vous vraiment réinitialiser la licence de CE PC ?',
+      confirmDelete: '⚠️ ATTENTION : Voulez-vous supprimer TOTALEMENT cette machine de votre base de données ?',
+    },
+    converter: {
+      title: 'Convertisseur MP3',
+      subtitle: 'Extraction audio haute qualité (Offline)',
+      selectVideo: 'Sélectionner une vidéo',
+      videoSelected: 'Vidéo sélectionnée',
+      chooseVideo: 'Choisir une vidéo',
+      startBtn: 'Lancer la conversion',
+      converting: 'Conversion en cours...',
+      convertingSub: 'Extraction de la piste audio libmp3lame 192kbps',
+      success: 'Conversion terminée !',
+      successSub: 'Votre fichier MP3 est prêt au même endroit.',
+      anotherBtn: 'Convertir une autre vidéo',
+      error: 'Erreur',
+      retryBtn: 'Réessayer',
+      failed: 'La conversion a échoué.',
+    },
+    compressor: {
+      title: 'Compresseur Vidéo',
+      subtitle: 'Réduire le poids pour le partage',
+      selectVideo: 'Sélectionner une vidéo',
+      videoSelected: 'Vidéo sélectionnée',
+      chooseVideo: 'Choisir une vidéo',
+      qualityLabel: 'Qualité de compression',
+      qLow: 'Basse',
+      qLowDesc: 'Max Gain',
+      qMed: 'Moyenne',
+      qMedDesc: 'Équilibré',
+      qWhatsapp: 'WhatsApp',
+      qWhatsappDesc: 'Cible 720p',
+      startBtn: 'Lancer la compression',
+      compressing: 'Compression en cours...',
+      compressingSub: 'Optimisation des flux H.264 & AAC',
+      success: 'Prêt pour le partage ! ❤️',
+      successSub: 'La vidéo a été optimisée avec succès.',
+      saveLocation: 'Enregistré dans Conversions/Compressed',
+      anotherBtn: 'Compresser une autre vidéo',
+      error: 'Erreur',
+      retryBtn: 'Réessayer',
+      failed: 'La compression a échoué.',
+    },
+    batch: {
+      title: 'Téléchargement Groupé',
+      subtitle: 'Téléchargement groupé & Playlists',
+      inputLabel: 'Lien de la Playlist ou Vidéo',
+      inputPlaceholder: 'Collez ici le lien YouTube (Playlist, Chaîne, Vidéo...)',
+      fetch: 'Charger',
+      fetching: 'Analyse en cours...',
+      fetchingSub: 'Récupération des informations...',
+      fetchBtn: 'Analyser la liste',
+      selectedCount: '{selected} sur {total} sélectionnés',
+      selectAll: 'Tout sélectionner',
+      deselectAll: 'Tout désélectionner',
+      videoMode: 'VIDÉO',
+      audioMode: 'AUDIO',
+      startBtn: 'Lancer le téléchargement ({count})',
+      successTitle: 'Tout est prêt !',
+      successSub: 'Vos téléchargements ont été ajoutés.',
+      addingTitle: 'Planification rapide...',
+      addingSub: 'Préparation des files d\'attente individuelles.',
+      errorFetch: 'Impossible de lire la playlist. Vérifiez le lien.',
+      items: 'éléments',
+    },
+    about: {
+      description: 'Gestionnaire de téléchargements avancé avec accélération multi-threading',
+      developer: 'Développeur',
+      role: 'Concepteur et Développeur',
+      features: 'Fonctionnalités',
+      copyright: 'Copyright © 2024-2025 Oumarou Abdoul Jabbar',
+      licenseLabel: 'Licence',
+      feature1: 'Téléchargements accélérés avec multi-threading',
+      feature2: 'Support des plateformes de streaming (YouTube, TikTok, Facebook, Instagram)',
+      feature3: 'Interception automatique des téléchargements (comme IDM)',
+      feature4: 'Gestionnaire de files d\'attente intelligent',
+      feature5: 'Reprise des téléchargements interrompus',
+      feature6: 'Extension Chrome intégrée',
+      feature7: 'Convertisseur MP3 intégré',
+      feature8: 'Compresseur Vidéo intégré',
+      feature9: 'Téléchargement groupé / Playlist',
+      feature10: 'Mise à jour automatique',
+      feature11: 'Système d\'avis et commentaires',
+      feature12: 'Support multilingue (Français / Anglais)',
+    },
   },
   en: {
     sidebar: {
@@ -250,6 +618,7 @@ const translations: Record<Language, Translations> = {
       queued: 'Queued',
       trash: 'Trash',
       settings: 'Settings',
+      about: 'About',
     },
     settings: {
       title: 'Settings',
@@ -355,6 +724,185 @@ const translations: Record<Language, Translations> = {
       audioDesc: 'MP3 (Best Quality)',
       download: 'Download',
       unknown: 'Unknown size',
+    },
+    sidebarExtra: {
+      converter: 'MP3 Converter',
+      compressor: 'Video Compressor',
+      batch: 'Batch Download',
+      feedback: 'Give Feedback',
+      updateAvailable: 'UPDATE AVAILABLE · Click to install',
+      updateDownloading: 'Downloading update...',
+      updateReady: '✅ Ready! Install & Restart',
+      updateError: '⚠️ Download error. Try again.',
+      navGroup: 'Navigation',
+      toolsGroup: 'Tools & Services',
+    },
+    feedback: {
+      title: 'Your feedback helps us!',
+      subtitle: 'How do you find DoulGet?',
+      commentLabel: 'Comment (optional)',
+      commentPlaceholder: 'Share your experience, suggestions, or issues...',
+      sendError: '⚠️ Error sending. Check your connection.',
+      later: 'Later',
+      send: 'Send',
+      thankYou: 'Thank you for your feedback!',
+      thankYouSub: 'Your feedback helps us improve DoulGet.',
+      bad: 'Bad',
+      okay: 'Okay',
+      good: 'Good',
+      veryGood: 'Very Good',
+      excellent: 'Excellent!',
+    },
+    license: {
+      title: 'Activation Required',
+      subtitle: 'Please enter your license key to activate DoulGet.',
+      placeholder: 'Enter your license key',
+      activate: 'ACTIVATE',
+      activating: 'Activating...',
+      machineId: 'Machine ID',
+      copy: 'Copy',
+      copied: 'Copied!',
+    },
+    admin: {
+      title: 'License Administration (SECRET)',
+      accessRestricted: 'Restricted access. Please enter the Master Password.',
+      password: 'Password',
+      unlock: 'UNLOCK',
+      wrongPassword: 'Incorrect password.',
+      tabGeneration: 'Generation',
+      tabCloud: 'Cloud Management',
+      tabUpdates: 'Updates',
+      tabFeedback: 'Reviews',
+      duration: 'Validity Period',
+      month1: '1 Month (Standard)',
+      year1: '1 Year (Premium)',
+      lifetime: 'Lifetime (Unlimited)',
+      customDate: 'Custom Date...',
+      singleKey: 'Single Key',
+      hwidClient: 'Client HWID',
+      generate: 'GENERATE',
+      bulkGeneration: 'Bulk Generation',
+      count: 'Count:',
+      generateKeys: 'GENERATE {count} KEYS',
+      maintenance: 'Local Maintenance',
+      maintenanceDesc: 'Reset the activation of this computer',
+      resetPc: 'RESET THIS PC',
+      results: 'Results',
+      copyClip: 'Copy',
+      exportTxt: 'Export .txt',
+      subscribers: 'Subscribers',
+      online: 'Online',
+      banned: 'Banned',
+      refresh: 'REFRESH',
+      searchPlaceholder: 'Search by HWID or original key...',
+      hwid: 'HWID',
+      originalKey: 'Original Key',
+      activation: 'Activation',
+      statusLabel: 'Status',
+      actionLabel: 'Action',
+      noUsers: 'No registered users.',
+      activatedOn: 'Activated on',
+      statusActive: 'ACTIVE',
+      statusBan: 'BAN',
+      statusTrial: 'TRIAL',
+      publishVersion: 'Publish a new version',
+      versionNumber: 'Version Number (e.g: 1.2.9)',
+      directLink: 'Direct or Public URL',
+      publishUpdate: 'PUBLISH UPDATE',
+      uploading: 'UPLOADING...',
+      publishNote: 'Note: This will show an immediate notification to all clients using a different version.',
+      setupExe: 'Setup (.exe)',
+      extensionZip: 'Extension (.zip)',
+      clickOrDrag: 'Click or drag here',
+      totalFeedback: 'Total Reviews',
+      avgRating: 'Average Rating',
+      noFeedback: 'No reviews yet.',
+      logout: 'Log out',
+      bulkNote: 'Bulk generated keys are linked to a generic ID and will bind to the user upon activation.',
+      confirmReset: 'Do you really want to reset the license of THIS PC?',
+      confirmDelete: '⚠️ WARNING: Do you want to COMPLETELY delete this machine from your database?',
+    },
+    converter: {
+      title: 'MP3 Converter',
+      subtitle: 'High quality audio extraction (Offline)',
+      selectVideo: 'Select a video',
+      videoSelected: 'Video selected',
+      chooseVideo: 'Choose a video',
+      startBtn: 'Start Conversion',
+      converting: 'Converting...',
+      convertingSub: 'Extracting audio track libmp3lame 192kbps',
+      success: 'Conversion complete!',
+      successSub: 'Your MP3 file is ready in the same folder.',
+      anotherBtn: 'Convert another video',
+      error: 'Error',
+      retryBtn: 'Retry',
+      failed: 'Conversion failed.',
+    },
+    compressor: {
+      title: 'Video Compressor',
+      subtitle: 'Reduce size for sharing',
+      selectVideo: 'Select a video',
+      videoSelected: 'Video selected',
+      chooseVideo: 'Choose a video',
+      qualityLabel: 'Compression quality',
+      qLow: 'Low',
+      qLowDesc: 'Max Gain',
+      qMed: 'Medium',
+      qMedDesc: 'Balanced',
+      qWhatsapp: 'WhatsApp',
+      qWhatsappDesc: 'Target 720p',
+      startBtn: 'Start Compression',
+      compressing: 'Compressing...',
+      compressingSub: 'Optimizing H.264 & AAC streams',
+      success: 'Ready for sharing! ❤️',
+      successSub: 'The video has been successfully optimized.',
+      saveLocation: 'Saved in Conversions/Compressed',
+      anotherBtn: 'Compress another video',
+      error: 'Error',
+      retryBtn: 'Retry',
+      failed: 'Compression failed.',
+    },
+    batch: {
+      title: 'Batch Download',
+      subtitle: 'Batch Download & Playlists',
+      inputLabel: 'Playlist or Video Link',
+      inputPlaceholder: 'Paste YouTube link here (Playlist, Channel, Video...)',
+      fetch: 'Load',
+      fetching: 'Fetching...',
+      fetchingSub: 'Fetching information...',
+      fetchBtn: 'Analyze list',
+      selectedCount: '{selected} of {total} selected',
+      selectAll: 'Select All',
+      deselectAll: 'Deselect All',
+      videoMode: 'VIDEO',
+      audioMode: 'AUDIO',
+      startBtn: 'Start Download ({count})',
+      successTitle: 'All ready!',
+      successSub: 'Your downloads have been added.',
+      addingTitle: 'Fast scheduling...',
+      addingSub: 'Preparing individual queues.',
+      errorFetch: 'Failed to fetch playlist. Check the link.',
+      items: 'items',
+    },
+    about: {
+      description: 'Advanced download manager with multi-threading acceleration',
+      developer: 'Developer',
+      role: 'Designer and Developer',
+      features: 'Features',
+      copyright: 'Copyright © 2024-2025 Oumarou Abdoul Jabbar',
+      licenseLabel: 'License',
+      feature1: 'Accelerated downloads with multi-threading',
+      feature2: 'Streaming platform support (YouTube, TikTok, Facebook, Instagram)',
+      feature3: 'Automatic download interception (like IDM)',
+      feature4: 'Smart download queue manager',
+      feature5: 'Resume interrupted downloads',
+      feature6: 'Built-in Chrome Extension',
+      feature7: 'Built-in MP3 Converter',
+      feature8: 'Built-in Video Compressor',
+      feature9: 'Batch Download / Playlist',
+      feature10: 'Automatic updates',
+      feature11: 'Feedback and review system',
+      feature12: 'Multilingual support (French / English)',
     },
   },
 };

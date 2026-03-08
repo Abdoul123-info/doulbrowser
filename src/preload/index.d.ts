@@ -67,6 +67,26 @@ export interface DownloadAPI {
   pingLicense: () => Promise<{ success: boolean }>
   adminDeleteLicenseCloud: (password: string, targetMid: string) => Promise<{ success: boolean, error?: string }>
   onLicenseDeactivated: (callback: (event: any, reason: string) => void) => void
+  selectLocalVideo: () => Promise<string | null>
+  localConvertVideoToMp3: (path: string) => Promise<{ success: boolean, path: string }>
+  onConversionProgress: (callback: (event: any, data: any) => void) => () => void
+  // [v1.3.0] Video Compressor APIs 🎥
+  localCompressVideo: (path: string, quality: 'low' | 'medium' | 'whatsapp') => Promise<{ success: boolean, path: string, filename: string }>
+  onCompressionProgress: (callback: (event: any, data: any) => void) => () => void
+  // [v1.4.0] Batch Downloader APIs 📋
+  getPlaylistInfo: (url: string) => Promise<{ title: string, entries: any[] }>
+  batchAddToQueue: (data: { items: any[], playlistTitle?: string, audioOnly: boolean, headers?: Record<string, string> }) => void
+  // [v1.6.1] Feedback APIs ★
+  submitFeedback: (rating: number, comment: string) => Promise<{ success: boolean, error?: string }>
+  adminGetFeedback: (password: string) => Promise<{ success: boolean, feedback?: any[], error?: string }>
+  getFeedbackStatus: () => Promise<{ submitted: boolean }>
+  // [v1.6.0] Auto-Update APIs 🚀
+  startAppUpdate: (downloadUrl: string) => Promise<{ success: boolean, error?: string }>
+  installAppUpdate: () => Promise<{ success: boolean, error?: string }>
+  onUpdateProgress: (callback: (event: any, progress: number) => void) => void
+  onUpdateReady: (callback: (event: any) => void) => void
+  onUpdateError: (callback: (event: any, error: string) => void) => void
+  onExternalBatch: (callback: (event: any, data: any) => void) => void
   removeDownloadListeners: () => void
 }
 

@@ -41,6 +41,16 @@
         });
     });
 
+    // [v1.6.1] Lok-lok stream interception cache
+    const lokLokStreamCache = {};
+    window.addEventListener('message', (event) => {
+        if (event.source !== window || event.data?.type !== 'DOULGET_STREAM_INTERCEPTED') return;
+        const { ep, se, url } = event.data;
+        const key = `${se}-${ep}`;
+        lokLokStreamCache[key] = url;
+        console.log(`[DoulGet] 📡 Cached stream: S${se}E${ep} → ${url.substring(0, 50)}...`);
+    });
+
     // Map video elements to their CDN URLs
     const videoUrlMap = new WeakMap(); // video element -> CDN URL
 
@@ -117,6 +127,171 @@
                 
                 return true;
             } catch (e) { return false; }
+        });
+    }
+
+    function findAllEpisodes() {
+        const episodes = [];
+        const currentUrl = location.href;
+        
+        // [v1.5.2] Broad selectors + smart context filtering
+        const selectors = [
+            '.episode-item', '.play-list-item', '.ant-tabs-tab', 
+            '.ep-item', '.episode-link', '.episode', 
+            '[class*="episode"]', '[class*="play-list"]',
+            '.playlist-content a', '.series-episodes a',
+            '.ant-tabs-tab-btn', '.episode-btn',
+            '.pc-resource-box *', '.pc-btn', '.pc-card',
+            '.pc-episode', '.vui-episode', '.vui-tab',
+            'div[class*="resource-box"] *', 'span[class*="resource"]',
+            '.resource-box-content *', '.resource-title',
+            // [v1.5.2] Re-added broad selectors (needed for Lok-lok's generic DOM)
+            '[class*="item"]', '[class*="box"] span'
+        ];
+        
+        // Numbers that are resolutions/bitrates, NOT episodes
+        const blacklist = new Set([143, 144, 240, 360, 480, 720, 1080, 2160, 1024, 2048, 4096]);
+        
+        // [v1.5.3] Ancestor classes that indicate player controls OR non-episode zones
+        const excludedAncestors = [
+            'quality', 'resolution', 'player-control', 'settings', 'speed',
+            'bitrate', 'playback', 'volume', 'progress', 'slider',
+            'subtitle', 'caption', 'menu-panel', 'tooltip', 'overlay',
+            // Ads & metadata zones
+            'ad-', 'banner', 'movie-box', 'moviebox', 'advert', 'promo',
+            'detail-info', 'meta-info', 'release-date', 'date-info',
+            'footer', 'comment', 'review'
+        ];
+        
+        console.log('[DoulGet] Scanning for episodes (v1.5.3)...');
+        
+        const allCandidates = new Set();
+        selectors.forEach(sel => {
+            try {
+                document.querySelectorAll(sel).forEach(el => allCandidates.add(el));
+            } catch (e) {}
+        });
+
+        allCandidates.forEach(el => {
+            // [v1.5.3] Skip elements inside player controls / ads / metadata zones
+            let ancestorCheck = el;
+            let ancestorClasses = '';
+            for (let i = 0; i < 5 && ancestorCheck; i++) {
+                ancestorClasses += ' ' + (ancestorCheck.className || '');
+                ancestorCheck = ancestorCheck.parentElement;
+            }
+            const ancestorLower = ancestorClasses.toLowerCase();
+            if (excludedAncestors.some(kw => ancestorLower.includes(kw))) return;
+            
+            // [v1.5.3] Skip elements whose parent text contains a date pattern (e.g., "2020-10-02")
+            const parentText = (el.parentElement?.textContent || '').trim();
+            const grandParentText = (el.parentElement?.parentElement?.textContent || '').trim();
+            const dateRegex = /\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}/;
+            if (dateRegex.test(parentText) || dateRegex.test(grandParentText)) return;
+            // Also check if the text ITSELF is part of a date-like sequence in the immediate surroundings
+            if (el.parentElement && dateRegex.test(el.parentElement.innerText)) return;
+            
+            // [v1.4.7] Better "Playing" detection
+            const isPlayingElement = el.classList.contains('active') || 
+                                   el.classList.contains('playing') || 
+                                   el.classList.contains('current') ||
+                                   el.querySelector('img') || 
+                                   el.querySelector('[class*="playing"]');
+
+            let text = el.textContent.trim().replace(/\s+/g, ' ');
+            
+            if (isPlayingElement && (!text || text.length < 1)) {
+                episodes.push({ title: 'Episode (Playing)', url: currentUrl });
+                return;
+            }
+
+            if (!text) return;
+            
+            // [v1.5.2] Skip text that looks like a resolution (e.g. "480p", "1080p", "720P")
+            if (/^\d{3,4}p$/i.test(text)) return;
+            // Skip long text that is clearly not an episode label
+            if (text.length > 30) return;
+
+            const epMatch = text.match(/(?:Episode|Ep\.?\s?|S\d+E|Épisode|Ép\.?\s?|Part[.\s]?|#)?\s?(\d{1,3})(?!\s?p|fps|kbps)/i);
+            
+            if (epMatch || (text.length <= 4 && /^\d+$/.test(text))) {
+                const epNumStr = epMatch ? epMatch[1] : text.match(/\d+/)?.[0];
+                if (!epNumStr) return;
+
+                const epNum = parseInt(epNumStr);
+                
+                // Exclusion logic
+                if (blacklist.has(epNum)) return;
+                if (epNum > 500 && !text.toLowerCase().includes('episode') && !text.toLowerCase().includes('ep')) return;
+                if (epNum === 0) return; // Episode 0 is almost always noise
+                if (text.toLowerCase().includes('size') || text.toLowerCase().includes('mo') || text.toLowerCase().includes('gb')) return;
+
+                const href = el.href || el.querySelector('a')?.href || (el.tagName === 'A' ? el.href : null);
+                
+                let se = '01';
+                if (location.href.includes('lok-lok.cc')) {
+                    const sMatch = location.href.match(/[?&]se=(\d+)/);
+                    if (sMatch) se = sMatch[1];
+                }
+
+                episodes.push({
+                    title: `Episode ${epNum}`, 
+                    url: (href && href.startsWith('http')) ? href : currentUrl,
+                    epNum: epNum,
+                    se: parseInt(se)
+                });
+            }
+        });
+
+        // Deduplicate by title or episode number
+        const seenTitles = new Set();
+        const seenNums = new Set();
+        let filtered = episodes.filter(ep => {
+            if (ep.title.includes('Playing')) return true; // Keep playing marker for now
+            if (seenTitles.has(ep.title) || (ep.epNum && seenNums.has(ep.epNum))) return false;
+            seenTitles.add(ep.title);
+            if (ep.epNum) seenNums.add(ep.epNum);
+            return true;
+        });
+
+        // Resolve "Playing" title
+        const playingIdx = filtered.findIndex(e => e.title.includes('Playing'));
+        if (playingIdx !== -1) {
+            const urlMatch = currentUrl.match(/[?&]ep=(\d+)/) || currentUrl.match(/\/episode-(\d+)/i) || currentUrl.match(/_E(\d+)/i);
+            if (urlMatch) {
+                const num = parseInt(urlMatch[1]);
+                filtered[playingIdx].title = `Episode ${num}`;
+                filtered[playingIdx].epNum = num;
+            } else if (filtered.length > 1) {
+                // Remove the "(Playing)" duplicate if we already have that number
+                filtered.splice(playingIdx, 1);
+            } else {
+                filtered[playingIdx].title = 'Episode 1';
+                filtered[playingIdx].epNum = 1;
+            }
+        }
+        
+        // Final Sort by episode number
+        filtered.sort((a, b) => (a.epNum || 0) - (b.epNum || 0));
+
+        console.log(`[DoulGet] Found ${filtered.length} episodes:`, filtered.map(e => e.title).join(', '));
+        return filtered;
+    }
+
+    // [v1.4.3] Updated: Always use background for better CORS/Credentials
+    async function resolveLokLokStream(subjectId, detailPath, se, ep, referer) {
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+                action: 'resolveLokLokStream',
+                subjectId, detailPath, se, ep,
+                referer: referer || location.href // [v1.4.6] Pass explicit referer
+            }, (res) => {
+                if (res?.success) resolve(res.url);
+                else {
+                    console.warn(`[DoulGet] Resolution failed for ep ${ep}:`, res?.error || 'Unknown error');
+                    resolve(null);
+                }
+            });
         });
     }
 
@@ -669,7 +844,7 @@
                     // PRIORITY 3: Waiting sites or page URL fallback
                     if (!downloadUrl) {
                         if (['lok-lok.cc', 'hakunaymatata.com', 'moovbob.fr'].some(site => currentUrl.includes(site))) {
-                            btn.textContent = '🔍 Waiting for link...';
+                            btn.textContent = chrome.i18n.getMessage('waitingLink');
                             setTimeout(() => { btn.innerHTML = text; }, 3000); return;
                         }
                         downloadUrl = currentUrl;
@@ -694,10 +869,10 @@
                     const cleanTitle = getCleanTitle();
                     const filename = `${cleanTitle}${isAudio ? '.mp3' : '.mp4'}`;
                     btn.textContent = '...';
-                    if (!isContextValid()) { btn.textContent = '🔄 Refresh'; return; }
+                    if (!isContextValid()) { btn.textContent = chrome.i18n.getMessage('refresh'); return; }
 
                     chrome.runtime.sendMessage({ action: 'sendDownload', url: downloadUrl, filename: filename, type: isAudio ? 'audio/mpeg' : 'video/mp4', audioOnly: isAudio, headers: cachedHeaders }, (response) => {
-                        if (chrome.runtime.lastError || !response?.success) { btn.textContent = '🔄 Refresh'; return; }
+                        if (chrome.runtime.lastError || !response?.success) { btn.textContent = chrome.i18n.getMessage('refresh'); return; }
                         btn.textContent = '⏳'; btn.style.pointerEvents = 'none';
                         let lastPercentage = 0;
                         let errorCount = 0;
@@ -761,7 +936,7 @@
             return btn;
         }
 
-        const btnVideo = createActionButton('🎬 Vidéo', false), btnAudio = createActionButton('🎵 Audio', true);
+        const btnVideo = createActionButton(chrome.i18n.getMessage('videoBtn'), false), btnAudio = createActionButton(chrome.i18n.getMessage('audioBtn'), true);
         container.appendChild(btnVideo); container.appendChild(btnAudio);
 
         // [v1.3.4] INJECT INTO PLAYER CONTAINER (universal approach)
@@ -825,7 +1000,7 @@
 
         function resetStates() {
             [btnVideo, btnAudio].forEach(b => { if (b.doulPollInterval) clearInterval(b.doulPollInterval); b.doulPollInterval = null; b.style.pointerEvents = 'all'; });
-            btnVideo.innerHTML = '🎬 Vidéo'; btnAudio.innerHTML = '🎵 Audio';
+            btnVideo.innerHTML = chrome.i18n.getMessage('videoBtn'); btnAudio.innerHTML = chrome.i18n.getMessage('audioBtn');
             btnVideo.style.background = '#007AFF !important'; btnAudio.style.background = '#6366f1 !important';
         }
 
@@ -870,7 +1045,7 @@
         const btn = document.createElement('a');
         btn.className = 'doul-download-link-btn';
         btn.doulTargetLink = link; // [v1.2.2] Link back to original anchor
-        btn.title = 'Télécharger avec DoulGet';
+        btn.title = chrome.i18n.getMessage('downloadWithDoulGet');
         btn.href = '#';
         btn.innerHTML = `
             <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px">
@@ -971,10 +1146,10 @@
             }, (response) => {
                 if (chrome.runtime.lastError || !response?.success) {
                     console.error('❌ Failed to send download request:', chrome.runtime.lastError);
-                    btn.innerHTML = '❌ Erreur';
+                    btn.innerHTML = chrome.i18n.getMessage('error');
                     btn.style.background = 'linear-gradient(135deg, #dc3545, #c82333) !important';
                 } else {
-                    btn.innerHTML = '✅ Ajouté!';
+                    btn.innerHTML = chrome.i18n.getMessage('added');
                     btn.style.background = 'linear-gradient(135deg, #28a745, #1e7e34) !important';
                     console.log('✅ Download request sent to DoulGet via Background');
                 }
@@ -1008,7 +1183,7 @@
 
         const bar = document.createElement('div');
         bar.id = 'doulget-capture-bar';
-        const cleanName = filename || url.split('/').pop().split('?')[0] || 'Fichier détecté';
+        const cleanName = filename || url.split('/').pop().split('?')[0] || chrome.i18n.getMessage('fileDetected');
         
         bar.style.cssText = `
             all: unset !important;
@@ -1016,6 +1191,7 @@
             top: 15px !important;
             right: 15px !important;
             width: 380px !important;
+            max-height: 85vh !important;
             background: #1c1c1e !important;
             border: 2px solid #007AFF !important;
             border-radius: 14px !important;
@@ -1030,6 +1206,7 @@
             animation: doulSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
             pointer-events: auto !important;
             visibility: visible !important;
+            overflow: hidden !important;
         `;
 
         // Add keyframes if not present
@@ -1045,6 +1222,9 @@
                     from { opacity: 1; transform: translateX(0) scale(1); }
                     to { opacity: 0; transform: translateX(30px) scale(0.95); }
                 }
+                #doulget-ep-list::-webkit-scrollbar { width: 6px; }
+                #doulget-ep-list::-webkit-scrollbar-track { background: transparent; }
+                #doulget-ep-list::-webkit-scrollbar-thumb { background: #3a3a3c; border-radius: 10px; }
             `;
             document.head.appendChild(style);
         }
@@ -1056,7 +1236,7 @@
                 <div style="width:32px; height:32px; background:linear-gradient(135deg, #007AFF, #5B4BF5); border-radius:8px; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,122,255,0.4)">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </div>
-                <span style="font-size:13px; font-weight:700; letter-spacing:0.3px">DoulGet Capture</span>
+                <span style="font-size:13px; font-weight:700; letter-spacing:0.3px">${chrome.i18n.getMessage('captureTitle')}</span>
             </div>
             <button id="doul-close-bar" style="all:unset; cursor:pointer; opacity:0.5; padding:4px">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -1067,11 +1247,333 @@
         body.style.cssText = 'font-size:12px; opacity:0.9; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%';
         body.textContent = cleanName;
 
+        const episodes = findAllEpisodes();
+        let epListContainer = null;
+        let batchBtn = null;
+
+        // [v1.4.9] UI Container for episodes
+        const epWrapper = document.createElement('div');
+        epWrapper.id = 'doul-ep-wrapper';
+        epWrapper.style.display = 'flex';
+        epWrapper.style.flexDirection = 'column';
+        bar.appendChild(epWrapper);
+
+        function renderEpisodeList(list) {
+            epWrapper.innerHTML = '';
+            
+            if (list.length === 0) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'font-size:11px; color:#8e8e93; text-align:center; padding:10px; background:rgba(255,255,255,0.02); border-radius:8px';
+                empty.innerHTML = `${chrome.i18n.getMessage('noEpisodes')}<br><span id="doul-force-scan" style="color:#007AFF; cursor:pointer; font-weight:700">${chrome.i18n.getMessage('clickToRescan')}</span>`;
+                epWrapper.appendChild(empty);
+                
+                const forceBtn = empty.querySelector('#doul-force-scan');
+                forceBtn.onclick = () => {
+                    const newList = findAllEpisodes();
+                    renderEpisodeList(newList);
+                };
+                return;
+            }
+
+            const listToggle = document.createElement('div');
+            listToggle.style.cssText = 'display:flex; justify-content:space-between; align-items:center; margin-top:2px; margin-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:6px';
+            listToggle.innerHTML = `
+                <span style="font-size:12px; font-weight:700; color:#007AFF">${chrome.i18n.getMessage('episodes')} (${list.length})</span>
+                <div style="display:flex; gap:12px">
+                    <span style="font-size:11px; font-weight:600; color:#8e8e93; cursor:pointer" id="doul-force-scan">${chrome.i18n.getMessage('rescan')}</span>
+                    <span style="font-size:11px; font-weight:600; color:#8e8e93; cursor:pointer" id="doul-select-all">${chrome.i18n.getMessage('selectAll')}</span>
+                    <span style="font-size:11px; font-weight:600; color:#007AFF; cursor:pointer" id="doul-toggle-list">${chrome.i18n.getMessage('hide')}</span>
+                </div>
+            `;
+            epWrapper.appendChild(listToggle);
+
+            epListContainer = document.createElement('div');
+            epListContainer.id = 'doulget-ep-list';
+            epListContainer.style.cssText = 'display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; padding-right:4px; margin-bottom:8px';
+            
+            list.forEach((ep, index) => {
+                const item = document.createElement('div');
+                item.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px 10px; background:rgba(255,255,255,0.03); border-radius:8px; cursor:pointer';
+                item.innerHTML = `
+                    <input type="checkbox" checked class="doul-ep-checkbox" data-index="${index}" style="width:16px; height:16px; cursor:pointer">
+                    <span style="font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${ep.title}</span>
+                `;
+                item.onclick = (e) => {
+                    if (e.target.tagName !== 'INPUT') {
+                        const cb = item.querySelector('input');
+                        cb.checked = !cb.checked;
+                        updateBatchCount();
+                    }
+                };
+                item.querySelector('input').onchange = updateBatchCount;
+                epListContainer.appendChild(item);
+            });
+            epWrapper.appendChild(epListContainer);
+
+            batchBtn = document.createElement('button');
+            batchBtn.style.cssText = `
+                all: unset !important;
+                flex: none !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+                background: linear-gradient(135deg, #6366f1, #4f46e5) !important;
+                color: white !important;
+                padding: 10px !important;
+                border-radius: 10px !important;
+                text-align: center !important;
+                font-size: 13px !important;
+                font-weight: 700 !important;
+                cursor: pointer !important;
+                transition: all 0.2s !important;
+                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3) !important;
+                margin-top: 4px !important;
+            `;
+            epWrapper.appendChild(batchBtn);
+
+            const toggleBtn = listToggle.querySelector('#doul-toggle-list');
+            toggleBtn.onclick = () => {
+                const isHidden = epListContainer.style.display === 'none';
+                epListContainer.style.display = isHidden ? 'flex' : 'none';
+                toggleBtn.textContent = isHidden ? chrome.i18n.getMessage('hide') : chrome.i18n.getMessage('show');
+            };
+
+            const selectAllBtn = listToggle.querySelector('#doul-select-all');
+            let allSelected = true;
+            selectAllBtn.onclick = () => {
+                allSelected = !allSelected;
+                epWrapper.querySelectorAll('.doul-ep-checkbox').forEach(cb => cb.checked = allSelected);
+                selectAllBtn.textContent = allSelected ? chrome.i18n.getMessage('deselectAll') : chrome.i18n.getMessage('selectAll');
+                updateBatchCount();
+            };
+
+            const forceBtn = listToggle.querySelector('#doul-force-scan');
+            forceBtn.onclick = () => {
+                const newList = findAllEpisodes();
+                renderEpisodeList(newList);
+            };
+
+            batchBtn.onclick = async () => {
+                const selectedEps = Array.from(epWrapper.querySelectorAll('.doul-ep-checkbox'))
+                    .filter(cb => cb.checked)
+                    .map(cb => list[parseInt(cb.getAttribute('data-index'))]);
+
+                if (selectedEps.length === 0) return;
+
+                const cleanTitle = getCleanTitle().replace(/S\d+E\d+/i, '').trim();
+                const isLokLok = location.href.includes('lok-lok.cc');
+
+                // [v1.6.0] Click-and-Capture: click each episode, wait for video source, capture it
+                if (isLokLok) {
+                    batchBtn.textContent = chrome.i18n.getMessage('capturing');
+                    batchBtn.disabled = true;
+                    
+                    const items = [];
+                    const originalUrl = location.href;
+                    
+                    // Helper: find all clickable episode buttons on the page
+                    const findEpButton = (epNum) => {
+                        const epStr = String(epNum);
+                        const epStrPadded = String(epNum).padStart(2, '0');
+                        
+                        // [v1.6.2] Prioritize specialized containers for episodes
+                        const containers = document.querySelectorAll('[class*="play-list"], [class*="resource-box"], [class*="episode-list"]');
+                        for (const container of containers) {
+                            const candidates = container.querySelectorAll('*');
+                            for (const el of candidates) {
+                                if (el.children.length > 0) continue; // leaf nodes only
+                                const text = el.textContent.trim();
+                                if (text === epStr || text === epStrPadded) return el;
+                            }
+                        }
+
+                        // Fallback: global search with strict leaf-node and length check
+                        const candidates = document.querySelectorAll(
+                            '[class*="item"], [class*="episode"], .ant-tabs-tab, .pc-btn, [class*="btn"]'
+                        );
+                        for (const el of candidates) {
+                            const text = el.textContent.trim();
+                            if ((text === epStr || text === epStrPadded) && text.length <= 4) {
+                                // Double check it's not a date
+                                const pText = el.parentElement?.textContent || '';
+                                if (/\d{4}-\d{2}-\d{2}/.test(pText)) continue;
+                                return el;
+                            }
+                        }
+                        return null;
+                    };
+
+                    // [v1.6.1] Wait for intercepted stream from bridge.js (fast) or video.src (fallback)
+                    const waitForStream = (epNum, se, oldVideoSrc, timeoutMs = 8000) => {
+                        return new Promise(resolve => {
+                            const cacheKey = `${se}-${epNum}`;
+                            const start = Date.now();
+                            const check = setInterval(() => {
+                                // Priority 1: Check interception cache (instant)
+                                if (lokLokStreamCache[cacheKey]) {
+                                    clearInterval(check);
+                                    const url = lokLokStreamCache[cacheKey];
+                                    delete lokLokStreamCache[cacheKey]; // consume once
+                                    resolve(url);
+                                    return;
+                                }
+                                // Priority 2: Check video.src change (fallback)
+                                const video = document.querySelector('video');
+                                if (video) {
+                                    const newSrc = video.src || video.currentSrc;
+                                    if (newSrc && newSrc !== oldVideoSrc && newSrc.startsWith('http') && !newSrc.includes('/spa/')) {
+                                        clearInterval(check);
+                                        resolve(newSrc);
+                                        return;
+                                    }
+                                }
+                                if (Date.now() - start > timeoutMs) {
+                                    clearInterval(check);
+                                    resolve(null);
+                                }
+                            }, 150); // Check every 150ms for speed
+                        });
+                    };
+
+                    // Get season number
+                    const seMatch = location.href.match(/[?&]se=(\d+)/);
+                    const currentSe = seMatch ? parseInt(seMatch[1]) : 1;
+
+                    // Get current video source
+                    const currentVideo = document.querySelector('video');
+                    let lastVideoSrc = currentVideo ? (currentVideo.src || currentVideo.currentSrc) : '';
+
+                    for (let i = 0; i < selectedEps.length; i++) {
+                        const ep = selectedEps[i];
+                        const safeEpNum = ep.epNum || (i + 1);
+                        batchBtn.textContent = chrome.i18n.getMessage('captureProgress').replace('{current}', i + 1).replace('{total}', selectedEps.length);
+
+                        // Check if this is the currently playing episode
+                        const isCurrentEp = ep.title.includes('Playing') ||
+                            (ep.epNum && location.href.includes(`ep=${ep.epNum}`)) ||
+                            (ep.epNum === 1 && !location.href.includes('ep='));
+
+                        if (isCurrentEp && url && url.startsWith('http') && !url.includes('.cc/spa/')) {
+                            console.log(`[DoulGet] Ep ${safeEpNum}: Using captured CDN`);
+                            items.push({
+                                url: url,
+                                filename: `${cleanTitle} - Episode ${safeEpNum}.mp4`
+                            });
+                            lastVideoSrc = url;
+                            continue;
+                        }
+
+                        // Clear cache for this episode to catch fresh response
+                        delete lokLokStreamCache[`${currentSe}-${safeEpNum}`];
+
+                        // Click the episode button
+                        const btn = findEpButton(safeEpNum);
+                        if (!btn) {
+                            console.warn(`[DoulGet] Ep ${safeEpNum}: Button not found, skipping`);
+                            continue;
+                        }
+
+                        console.log(`[DoulGet] Ep ${safeEpNum}: Clicking...`);
+                        btn.click();
+
+                        // Wait for intercepted stream (fast) or video.src (fallback)
+                        const newSrc = await waitForStream(safeEpNum, currentSe, lastVideoSrc, 8000);
+                        if (newSrc) {
+                            console.log(`[DoulGet] Ep ${safeEpNum}: ⚡ Got → ${newSrc.substring(0, 60)}...`);
+                            items.push({
+                                url: newSrc,
+                                filename: `${cleanTitle} - Episode ${safeEpNum}.mp4`
+                            });
+                            lastVideoSrc = newSrc;
+                        } else {
+                            console.warn(`[DoulGet] Ep ${safeEpNum}: Timeout`);
+                        }
+
+                        // Brief delay between clicks
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+
+                    // Navigate back to original episode (click first episode or go back)
+                    const origEpMatch = originalUrl.match(/[?&]ep=(\d+)/);
+                    const origEp = origEpMatch ? parseInt(origEpMatch[1]) : 1;
+                    const origBtn = findEpButton(origEp);
+                    if (origBtn) origBtn.click();
+
+                    console.log(`[DoulGet] Batch capture done: ${items.length}/${selectedEps.length} episodes`);
+
+                    if (items.length === 0) {
+                        batchBtn.textContent = chrome.i18n.getMessage('noCapture');
+                        batchBtn.disabled = false;
+                        setTimeout(updateBatchCount, 2500);
+                        return;
+                    }
+
+                    // Send to DoulGet
+                    batchBtn.textContent = chrome.i18n.getMessage('sendingBatch');
+                    chrome.runtime.sendMessage({
+                        action: 'sendBatchDownload',
+                        playlistTitle: cleanTitle,
+                        items: items,
+                        headers: {
+                            'User-Agent': navigator.userAgent,
+                            'Referer': 'https://lok-lok.cc/',
+                            'Origin': 'https://lok-lok.cc'
+                        }
+                    }, (res) => {
+                        batchBtn.disabled = false;
+                        if (res?.success) {
+                            batchBtn.textContent = chrome.i18n.getMessage('batchSent').replace('{count}', items.length);
+                            setTimeout(dismiss, 2000);
+                        } else {
+                            batchBtn.textContent = chrome.i18n.getMessage('batchError');
+                            setTimeout(updateBatchCount, 2500);
+                        }
+                    });
+
+                } else {
+                    // Non-Lok-lok: use existing URL directly
+                    const items = selectedEps.map((ep, i) => ({
+                        url: ep.url || url,
+                        filename: `${cleanTitle} - Episode ${ep.epNum || (i + 1)}.mp4`
+                    })).filter(i => i.url && i.url.startsWith('http') && !i.url.includes('/spa/'));
+
+                    batchBtn.textContent = chrome.i18n.getMessage('sendingBatch');
+                    chrome.runtime.sendMessage({
+                        action: 'sendBatchDownload',
+                        playlistTitle: cleanTitle,
+                        items: items,
+                        headers: {
+                            'User-Agent': navigator.userAgent,
+                            'Referer': location.origin + '/',
+                            'Origin': location.origin
+                        }
+                    }, (res) => {
+                        if (res?.success) {
+                            batchBtn.textContent = chrome.i18n.getMessage('batchAdded');
+                            setTimeout(dismiss, 1500);
+                        } else {
+                            batchBtn.textContent = chrome.i18n.getMessage('batchError');
+                            setTimeout(updateBatchCount, 2500);
+                        }
+                    });
+                }
+            };
+
+            function updateBatchCount() {
+                const count = Array.from(epWrapper.querySelectorAll('.doul-ep-checkbox')).filter(cb => cb.checked).length;
+                batchBtn.innerHTML = chrome.i18n.getMessage('downloadBtn').replace('{count}', count);
+                batchBtn.disabled = count === 0;
+                batchBtn.style.opacity = count === 0 ? '0.5' : '1';
+                batchBtn.style.cursor = count === 0 ? 'not-allowed' : 'pointer';
+            }
+            updateBatchCount();
+        }
+
+        renderEpisodeList(episodes);
         const footer = document.createElement('div');
-        footer.style.cssText = 'display:flex; gap:8px; margin-top:4px';
+        footer.style.cssText = 'display:flex; gap:8px; margin-top:8px; flex-wrap:wrap';
 
         const downloadBtn = document.createElement('button');
-        downloadBtn.textContent = 'Télécharger';
+        downloadBtn.textContent = chrome.i18n.getMessage('currentEpisode');
         downloadBtn.style.cssText = `
             all: unset !important;
             flex: 1 !important;
@@ -1095,16 +1597,16 @@
                 headers: headers
             }, (res) => {
                 if (res?.success) {
-                    downloadBtn.textContent = '✅ Ajouté !';
+                    downloadBtn.textContent = chrome.i18n.getMessage('added');
                     setTimeout(dismiss, 1500);
                 } else {
-                    downloadBtn.textContent = '❌ Erreur';
+                    downloadBtn.textContent = chrome.i18n.getMessage('error');
                 }
             });
         };
 
         const ignoreBtn = document.createElement('button');
-        ignoreBtn.textContent = 'Ignorer';
+        ignoreBtn.textContent = chrome.i18n.getMessage('ignore');
         ignoreBtn.style.cssText = `
             all: unset !important;
             padding: 8px 16px !important;
@@ -1129,6 +1631,7 @@
         footer.appendChild(downloadBtn);
         bar.appendChild(header);
         bar.appendChild(body);
+        if (batchBtn) bar.appendChild(batchBtn);
         bar.appendChild(footer);
 
         // [v1.3.8-fix] Ensure close button listener is attached after elements are in DOM
@@ -1138,9 +1641,9 @@
         document.body.appendChild(bar);
         currentFloatingCapture = bar;
 
-        // Auto-dismiss after 15 seconds
+        // Auto-dismiss after 30 seconds if list is open, else 15
         setTimeout(() => {
-            if (currentFloatingCapture === bar) dismiss();
+            if (currentFloatingCapture === bar && (epListContainer ? epListContainer.style.display === 'none' : true)) dismiss();
         }, 15000);
     }
 
@@ -1170,9 +1673,9 @@
     if (window.location.href.toLowerCase().split('?')[0].endsWith('.pdf')) {
         console.log('[DoulGet] PDF Viewer detected, triggering capture bar...');
         setTimeout(() => {
-            showFloatingCapture(window.location.href, document.title || 'Fichier PDF');
+            showFloatingCapture(window.location.href, document.title || chrome.i18n.getMessage('pdfFile'));
         }, 1500); // Small delay to let UI settle
     }
     
-    console.log('✅ DoulGet overlay system initialized (v1.3.8)');
+    console.log('✅ DoulGet overlay system initialized (v1.6.2)');
 })();
