@@ -11,6 +11,7 @@ import { LicenseGate } from './components/LicenseGate';
 import { MP3ConverterModal } from './components/MP3ConverterModal';
 import { VideoCompressorModal } from './components/VideoCompressorModal';
 import { BatchDownloadModal } from './components/BatchDownloadModal';
+import { BackgroundTasks } from './components/BackgroundTasks';
 import { FeedbackModal } from './components/FeedbackModal';
 
 export default function App() {
@@ -24,8 +25,10 @@ export default function App() {
   const [externalBatchData, setExternalBatchData] = useState<any>(null);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
 
+  // Background Tasks State
+  const [minimizedTasks, setMinimizedTasks] = useState<Record<string, { status: string; progress: number }>>({});
+
   const [isActivated, setIsActivated] = useState<boolean | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
   const checkActivation = async () => {
     try {
@@ -34,8 +37,6 @@ export default function App() {
     } catch (error) {
       console.error('Failed to check license status:', error);
       setIsActivated(false);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -85,13 +86,9 @@ export default function App() {
   }, []);
 
 
-  if (isLoading) {
-    return (
-      <div className="h-screen w-screen bg-[#020617] flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
-      </div>
-    );
-  }
+  const handleTaskStateUpdate = (type: string, state: { status: string; progress: number }) => {
+    setMinimizedTasks(prev => ({ ...prev, [type]: state }));
+  };
 
   return (
     <>
@@ -127,11 +124,23 @@ export default function App() {
           <QualitySelector />
           <MP3ConverterModal
             isOpen={isConverterOpen}
-            onClose={() => setIsConverterOpen(false)}
+            onClose={() => {
+              setIsConverterOpen(false);
+              setMinimizedTasks(prev => { const n = { ...prev }; delete n.converter; return n; });
+            }}
+            isMinimized={!!minimizedTasks.converter}
+            onMinimize={() => setIsConverterOpen(false)}
+            onReportState={(s) => handleTaskStateUpdate('converter', s)}
           />
           <VideoCompressorModal
             isOpen={isCompressorOpen}
-            onClose={() => setIsCompressorOpen(false)}
+            onClose={() => {
+              setIsCompressorOpen(false);
+              setMinimizedTasks(prev => { const n = { ...prev }; delete n.compressor; return n; });
+            }}
+            isMinimized={!!minimizedTasks.compressor}
+            onMinimize={() => setIsCompressorOpen(false)}
+            onReportState={(s) => handleTaskStateUpdate('compressor', s)}
           />
           <BatchDownloadModal
             isOpen={isBatchOpen}
@@ -144,6 +153,25 @@ export default function App() {
           <FeedbackModal
             isOpen={isFeedbackOpen}
             onClose={() => setIsFeedbackOpen(false)}
+          />
+
+          <BackgroundTasks
+            tasks={Object.entries(minimizedTasks)
+              .filter(([_, s]) => s.progress < 100 || s.status === 'active') // Hide finished success tasks? Or show them? Let's show active.
+              .map(([id, s]) => ({
+                id: id as any,
+                title: id,
+                progress: s.progress,
+                status: s.status as any
+              }))
+            }
+            onRestore={(type) => {
+              if (type === 'converter') setIsConverterOpen(true);
+              if (type === 'compressor') setIsCompressorOpen(true);
+            }}
+            onClose={(type) => {
+              setMinimizedTasks(prev => { const n = { ...prev }; delete n[type]; return n; });
+            }}
           />
         </div>
       )}

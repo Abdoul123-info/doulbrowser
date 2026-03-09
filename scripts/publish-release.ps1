@@ -2,12 +2,12 @@
 # Uploade automatiquement le .exe vers GitHub Releases via l'API REST
 
 param (
-    [string]$Version = "1.2.9",
+    [string]$Version = "1.7.5",
     [string]$Token = "", # Remplacez par votre token GitHub (GHP_...)
     [string]$Repo = "Abdoul123-info/doulbrowser"
 )
 
-$ExePath = "dist\doul-get-$Version-setup.exe"
+$ExePath = "dist/doul-get-$Version-setup.exe"
 
 if (-not (Test-Path $ExePath)) {
     Write-Host "ERREUR: Le fichier $ExePath n'existe pas. Compilez d'abord avec build-secure.ps1" -ForegroundColor Red
@@ -28,10 +28,18 @@ Write-Host "Tag v$Version créé." -ForegroundColor Green
 
 # Étape 2 : Créer le Release GitHub
 Write-Host "`n[2/3] Création du Release GitHub..." -ForegroundColor Yellow
+$RELEASE_VERSION = "1.8.0"
+$RELEASE_NAME = "DoulGet v1.8.0 - Background Tasks & Parallelism"
+$RELEASE_BODY = @"
+### Nouvelles Fonctionnalités :
+- **Background Tasks 🛠️** : Vous pouvez maintenant réduire les outils (Convertisseur MP3, Compresseur) en arrière-plan et continuer à utiliser l'application.
+- **Support des Redirections 🔄** : Correction du bug de mise à jour (0%) en gérant les redirections sécurisées de GitHub.
+- **Version Dynamique** : Correction de l'affichage de la version dans la fenêtre "À propos".
+"@
 $ReleaseBody = @{
     tag_name   = "v$Version"
-    name       = "DoulGet v$Version"
-    body       = "## DoulGet v$Version`n`n### Nouveautés`n- Correction de la notification de mise à jour persistante`n- Suppression de licence fiabilisée`n- Version affichée corrigée"
+    name       = "$RELEASE_NAME"
+    body       = "$RELEASE_BODY"
     draft      = $false
     prerelease = $false
 } | ConvertTo-Json

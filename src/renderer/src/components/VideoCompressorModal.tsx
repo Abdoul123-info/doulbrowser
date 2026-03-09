@@ -6,11 +6,14 @@ import { useTranslation } from '../utils/i18n';
 type VideoCompressorModalProps = {
     isOpen: boolean;
     onClose: () => void;
+    isMinimized?: boolean;
+    onMinimize?: () => void;
+    onReportState?: (state: { status: string; progress: number }) => void;
 };
 
 type CompressionQuality = 'low' | 'medium' | 'whatsapp';
 
-export function VideoCompressorModal({ isOpen, onClose }: VideoCompressorModalProps) {
+export function VideoCompressorModal({ isOpen, onClose, isMinimized, onMinimize, onReportState }: VideoCompressorModalProps) {
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
     const [status, setStatus] = useState<'idle' | 'compressing' | 'success' | 'error'>('idle');
     const [quality, setQuality] = useState<CompressionQuality>('whatsapp');
@@ -20,22 +23,33 @@ export function VideoCompressorModal({ isOpen, onClose }: VideoCompressorModalPr
     const { t } = useTranslation();
 
     useEffect(() => {
-        if (!isOpen) {
+        if (!isOpen && !isMinimized) {
             setStatus('idle');
             setSelectedPath(null);
             setProgress(0);
             setError(null);
             setResultName(null);
-        } else {
-            const removeListener = window.api.onCompressionProgress((_event, data: any) => {
-                setProgress(data.progress);
-            });
-            return () => {
-                if (typeof removeListener === 'function') removeListener();
-            };
         }
-        return undefined;
-    }, [isOpen]);
+    }, [isOpen, isMinimized]);
+
+    useEffect(() => {
+        const removeListener = window.api.onCompressionProgress((_event, data: any) => {
+            setProgress(data.progress);
+        });
+        return () => {
+            if (typeof removeListener === 'function') removeListener();
+        };
+    }, []);
+
+    // Report state to parent for BackgroundTasks pill
+    useEffect(() => {
+        if (onReportState) {
+            onReportState({
+                status: status === 'compressing' ? 'active' : (status === 'success' || status === 'error' ? status : 'active'),
+                progress
+            });
+        }
+    }, [status, progress, onReportState]);
 
     const handleSelectFile = async () => {
         try {
@@ -86,9 +100,16 @@ export function VideoCompressorModal({ isOpen, onClose }: VideoCompressorModalPr
                             <p className="text-xs text-muted-foreground">{t.compressor.subtitle}</p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors">
-                        <X className="w-5 h-5 text-muted-foreground" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {onMinimize && (
+                            <button onClick={onMinimize} className="p-2 hover:bg-white/5 rounded-full transition-colors text-muted-foreground hover:text-white" title="Réduire">
+                                <Minimize2 className="w-4 h-4" />
+                            </button>
+                        )}
+                        <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                            <X className="w-5 h-5 text-muted-foreground" />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Content */}

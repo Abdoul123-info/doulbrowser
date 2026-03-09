@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "==============================================" -ForegroundColor Blue
-Write-Host "   DoulGet - SÉCURISATION & BUILD (v1.6.2)    " -ForegroundColor Blue
+Write-Host "--- DOULGET BUILD SECURE (v1.8.0) ---" -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Blue
 
 # 1. Nettoyage

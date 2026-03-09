@@ -217,6 +217,15 @@ export function Sidebar({ activeFilter, onFilterChange, onSettingsClick, onAbout
                                 {t.sidebarExtra.updateReady}
                             </button>
                         )}
+                        {updateStatus === 'error' && (
+                            <button
+                                onClick={handleStartUpdate}
+                                className="w-full bg-destructive/20 hover:bg-destructive/30 text-destructive text-[10px] font-bold py-2 rounded-lg border border-destructive/30 flex flex-col items-center justify-center gap-0.5 transition-all"
+                            >
+                                <span>{t.sidebarExtra.updateError || 'Échec du téléchargement'}</span>
+                                <span className="opacity-70 font-normal uppercase text-[8px]">Réessayer</span>
+                            </button>
+                        )}
                     </div>
                 )}
 

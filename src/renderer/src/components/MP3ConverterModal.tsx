@@ -1,4 +1,4 @@
-import { X, FileVideo, Music, CheckCircle2, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
+import { X, FileVideo, Music, CheckCircle2, AlertCircle, Loader2, ArrowRight, Minimize2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from '../utils/i18n';
@@ -6,9 +6,12 @@ import { useTranslation } from '../utils/i18n';
 type MP3ConverterModalProps = {
     isOpen: boolean;
     onClose: () => void;
+    isMinimized?: boolean;
+    onMinimize?: () => void;
+    onReportState?: (state: { status: string; progress: number }) => void;
 };
 
-export function MP3ConverterModal({ isOpen, onClose }: MP3ConverterModalProps) {
+export function MP3ConverterModal({ isOpen, onClose, isMinimized, onMinimize, onReportState }: MP3ConverterModalProps) {
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
     const [status, setStatus] = useState<'idle' | 'converting' | 'success' | 'error'>('idle');
     const [progress, setProgress] = useState(0);
@@ -17,24 +20,35 @@ export function MP3ConverterModal({ isOpen, onClose }: MP3ConverterModalProps) {
     const { t } = useTranslation();
 
     useEffect(() => {
-        if (!isOpen) {
-            // Reset state on close
+        if (!isOpen && !isMinimized) {
+            // Reset state ONLY if not open AND not minimized (completely closed)
             setStatus('idle');
             setSelectedPath(null);
             setProgress(0);
             setError(null);
             setResultPath(null);
-        } else {
-            // Setup listener for conversion progress
-            const removeListener = window.api.onConversionProgress((_event, data: any) => {
-                setProgress(data.progress);
-            });
-            return () => {
-                if (typeof removeListener === 'function') removeListener();
-            };
         }
-        return undefined;
-    }, [isOpen]);
+    }, [isOpen, isMinimized]);
+
+    useEffect(() => {
+        // Setup listener for conversion progress (persistent if minimized)
+        const removeListener = window.api.onConversionProgress((_event, data: any) => {
+            setProgress(data.progress);
+        });
+        return () => {
+            if (typeof removeListener === 'function') removeListener();
+        };
+    }, []);
+
+    // Report state to parent for BackgroundTasks pill
+    useEffect(() => {
+        if (onReportState) {
+            onReportState({
+                status: status === 'converting' ? 'active' : (status === 'success' || status === 'error' ? status : 'active'),
+                progress
+            });
+        }
+    }, [status, progress, onReportState]);
 
     const handleSelectFile = async () => {
         try {
@@ -85,9 +99,16 @@ export function MP3ConverterModal({ isOpen, onClose }: MP3ConverterModalProps) {
                             <p className="text-xs text-muted-foreground">{t.converter.subtitle}</p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors">
-                        <X className="w-5 h-5 text-muted-foreground" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {onMinimize && (
+                            <button onClick={onMinimize} className="p-2 hover:bg-white/5 rounded-full transition-colors text-muted-foreground hover:text-white" title="Réduire">
+                                <Minimize2 className="w-4 h-4" />
+                            </button>
+                        )}
+                        <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                            <X className="w-5 h-5 text-muted-foreground" />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Content */}

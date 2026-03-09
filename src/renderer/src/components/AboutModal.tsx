@@ -1,5 +1,6 @@
 import { X, Award, Code2, Download, Users } from 'lucide-react';
 import { useTranslation } from '../utils/i18n';
+import { useState, useEffect } from 'react';
 
 interface AboutModalProps {
     isOpen: boolean;
@@ -8,6 +9,13 @@ interface AboutModalProps {
 
 export function AboutModal({ isOpen, onClose }: AboutModalProps) {
     const { t } = useTranslation();
+    const [version, setVersion] = useState('...');
+
+    useEffect(() => {
+        if (isOpen) {
+            window.api.getAppVersion().then(v => setVersion(v));
+        }
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
@@ -27,7 +35,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
                         <Download className="w-8 h-8 text-white" />
                         <div>
                             <h2 className="text-2xl font-bold text-white">DoulGet</h2>
-                            <p className="text-blue-100 text-sm">Version 1.6.2</p>
+                            <p className="text-blue-100 text-sm">Version {version}</p>
                         </div>
                     </div>
                     <button

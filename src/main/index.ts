@@ -5244,49 +5244,73 @@ app.whenReady().then(() => {
     console.log(`[Update] Starting download from: ${downloadUrl}`);
     console.log(`[Update] Target path: ${tempPath}`);
 
-    try {
-        // Remove old update if exists
-        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    const downloadFile = (url: string, redirectCount = 0): Promise<{ success: boolean, error?: string }> => {
+        if (redirectCount > 5) {
+            return Promise.resolve({ success: false, error: 'Trop de redirections' });
+        }
 
-        const file = fs.createWriteStream(tempPath);
-        const request = https.get(downloadUrl, (response) => {
-            if (response.statusCode !== 200) {
-                console.error(`[Update] Failed to download: ${response.statusCode}`);
-                event.sender.send('update-error', 'Impossible de télécharger la mise à jour.');
-                return;
+        return new Promise((resolve) => {
+            try {
+                // Remove old update if exists on first call
+                if (redirectCount === 0 && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+
+                const request = https.get(url, (response) => {
+                    // Handle Redirects (301, 302, 307, 308)
+                    if ([301, 302, 307, 308].includes(response.statusCode || 0) && response.headers.location) {
+                        console.log(`[Update] Redirecting to: ${response.headers.location}`);
+                        resolve(downloadFile(response.headers.location, redirectCount + 1));
+                        return;
+                    }
+
+                    if (response.statusCode !== 200) {
+                        console.error(`[Update] Failed to download: ${response.statusCode}`);
+                        event.sender.send('update-error', `Erreur serveur: ${response.statusCode}`);
+                        resolve({ success: false, error: `HTTP ${response.statusCode}` });
+                        return;
+                    }
+
+                    const totalSize = parseInt(response.headers['content-length'] || '0', 10);
+                    let downloadedSize = 0;
+                    const file = fs.createWriteStream(tempPath);
+
+                    response.on('data', (chunk) => {
+                        downloadedSize += chunk.length;
+                        file.write(chunk);
+                        
+                        if (totalSize > 0) {
+                            const progress = Math.round((downloadedSize / totalSize) * 100);
+                            event.sender.send('update-progress', progress);
+                        }
+                    });
+
+                    response.on('end', () => {
+                        file.end();
+                        console.log('[Update] Download complete.');
+                        event.sender.send('update-ready');
+                        resolve({ success: true });
+                    });
+
+                    response.on('error', (err) => {
+                        file.end();
+                        console.error('[Update] Stream error:', err);
+                        event.sender.send('update-error', err.message);
+                        resolve({ success: false, error: err.message });
+                    });
+                });
+
+                request.on('error', (err) => {
+                    console.error('[Update] Request error:', err);
+                    event.sender.send('update-error', err.message);
+                    resolve({ success: false, error: err.message });
+                });
+            } catch (error: any) {
+                console.error('[Update] Exception:', error);
+                resolve({ success: false, error: error.message });
             }
-
-            const totalSize = parseInt(response.headers['content-length'] || '0', 10);
-            let downloadedSize = 0;
-
-            response.on('data', (chunk) => {
-                downloadedSize += chunk.length;
-                file.write(chunk);
-                
-                if (totalSize > 0) {
-                    const progress = Math.round((downloadedSize / totalSize) * 100);
-                    // Throttling: send progress only once per integer %
-                    event.sender.send('update-progress', progress);
-                }
-            });
-
-            response.on('end', () => {
-                file.end();
-                console.log('[Update] Download complete.');
-                event.sender.send('update-ready');
-            });
         });
+    };
 
-        request.on('error', (err) => {
-            console.error('[Update] Request error:', err);
-            event.sender.send('update-error', err.message);
-        });
-
-        return { success: true };
-    } catch (error: any) {
-        console.error('[Update] Exception:', error);
-        return { success: false, error: error.message };
-    }
+    return await downloadFile(downloadUrl);
   })
 
   // [v1.6.0] Execute the downloaded installer and quit
