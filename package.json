@@ -1,6 +1,6 @@
 {
   "name": "doul-get",
-  "version": "1.8.0",
+  "version": "2.0.0",
   "description": "DoulGet - Gestionnaire de téléchargements avancé",
   "main": "./out/main/index.js",
   "author": {
@@ -52,7 +52,7 @@
     "@vitejs/plugin-react": "^5.0.3",
     "autoprefixer": "^10.4.22",
     "canvas": "^3.2.0",
-    "electron": "33.2.1",
+    "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^4.0.1",
     "eslint": "^9.36.0",

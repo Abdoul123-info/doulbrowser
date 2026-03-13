@@ -43,9 +43,14 @@ export function MP3ConverterModal({ isOpen, onClose, isMinimized, onMinimize, on
     // Report state to parent for BackgroundTasks pill
     useEffect(() => {
         if (onReportState) {
-            onReportState({
-                status: status === 'converting' ? 'active' : (status === 'success' || status === 'error' ? status : 'active'),
-                progress
+            let reportedStatus = 'active';
+            if (status === 'idle') reportedStatus = 'idle';
+            else if (status === 'success') reportedStatus = 'success';
+            else if (status === 'error') reportedStatus = 'error';
+            
+            onReportState({ 
+                status: reportedStatus, 
+                progress 
             });
         }
     }, [status, progress, onReportState]);

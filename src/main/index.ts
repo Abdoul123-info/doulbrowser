@@ -12,7 +12,6 @@ import { pluginManager } from './plugins/manager'
 import * as crypto from 'crypto'
 
 // DEBUG REMOVE
-// console.log('Electron require:', require('electron'));
 
 
 // SIMPLIFIED FIX: Minimal flags to avoid TikTok detection
@@ -79,6 +78,7 @@ interface DownloadTracker {
 const activeDownloads = new Map<string, DownloadTracker>()
 const recentlyCompletedDownloads = new Map<string, { timestamp: number }>()
 const RECENTLY_COMPLETED_TTL = 60000 // 60 seconds
+let isAppQuitting = false // [v1.9.5] Protect trackers during shutdown
 
 /**
  * [v1.7.0] Core logic for identifying downloads: URL + Format (Audio/Video).
@@ -112,7 +112,18 @@ let _cachedNodeDir: string | null | undefined = undefined    // undefined = not 
 let _cachedAria2Path: string | null | undefined = undefined  // [v1.7.2] NEW: for high-speed downloads
 // Removing activeDownloadCount in favor of dynamic calculation to prevent leaks
 
-// Interface pour les paramètres de l'application
+// [v1.9.9] GLOBAL IPC PROTECTION HELPER: Prevent 'Object has been destroyed' errors
+function safeSend(win: any, channel: string, ...args: any[]) {
+  if (win && !win.isDestroyed()) {
+    try {
+      win.webContents.send(channel, ...args)
+    } catch (e: any) {
+      console.warn(`[IPC] Failed to send to ${channel}:`, e.message)
+    }
+  }
+}
+
+// Intercepter les fermetures brusques de l'application
 interface AppSettings {
   downloadPath: string
   maxConcurrentDownloads: number
@@ -209,38 +220,63 @@ let appSettings: AppSettings = {
 
 // Function to get hardware UUID (Machine ID)
 async function getMachineId(): Promise<string> {
+  // [v1.8.6] Multi-Vault HWID Fallback System 🛡️
+  const getFallbackRegistry = (): string | null => {
+    if (process.platform !== 'win32') return null;
+    try {
+      const cmd = 'reg query "HKCU\\Software\\DoulGet" /v "MachineId"';
+      const output = execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+      const match = /MachineId\s+REG_SZ\s+(.*)/i.exec(output);
+      return match ? match[1].trim() : null;
+    } catch { return null; }
+  };
+
+  const saveFallbackRegistry = (id: string) => {
+    if (process.platform !== 'win32') return;
+    try {
+      const cmd = `reg add "HKCU\\Software\\DoulGet" /v "MachineId" /t REG_SZ /d "${id}" /f`;
+      execSync(cmd, { stdio: 'ignore' });
+    } catch (e) { console.error('Registry save failed:', e); }
+  };
+
   try {
+    // 1. Try Native HWID (Primary)
     if (process.platform === 'win32') {
       const output = execSync('wmic csproduct get uuid').toString()
-      return output.split('\n')[1].trim().toUpperCase() // Force Uppercase & Trim
+      const hwid = output.split('\n')[1].trim().toUpperCase()
+      if (hwid && hwid !== 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF') return hwid;
     } else if (process.platform === 'darwin') {
       const output = execSync("ioreg -rd1 -c IOPlatformExpertDevice | grep -E '(uuid|IOPlatformUUID)'").toString()
       return output.split('"')[3].trim().toUpperCase()
     } else {
-      // Linux
       const output = readFileSync('/var/lib/dbus/machine-id', 'utf8') || readFileSync('/etc/machine-id', 'utf8')
       return output.trim().toUpperCase()
     }
-  } catch (e) {
-    console.error('Failed to get Machine ID:', e)
+  } catch (e: any) {
+    console.warn('Native HWID failed, entering multi-vault fallback...', e?.message);
+  }
+
+  // 2. Fallback Multi-Vault (AppData + Registry)
+  try {
+    const dataPath = app.getPath('userData');
+    const idFile = join(dataPath, 'machine-id.txt');
     
-    // [v1.2.9] Persistent Fallback ID Security 🛡️
-    // If HWID fails, use a unique random ID stored on disk to prevent key sharing.
-    try {
-      const dataPath = app.getPath('userData')
-      const idFile = join(dataPath, 'machine-id.txt')
-      
-      if (existsSync(idFile)) {
-        return readFileSync(idFile, 'utf8').trim().toUpperCase()
-      } else {
-        const randomId = ('UNKNOWN-' + process.platform + '-' + crypto.randomBytes(4).toString('hex')).toUpperCase()
-        writeFileSync(idFile, randomId, 'utf8')
-        return randomId
-      }
-    } catch (saveErr) {
-      console.error('Failed to persist fallback ID:', saveErr)
-      return ('UNKNOWN-ID-' + process.platform).toUpperCase()
-    }
+    let idFromDisk: string | null = null;
+    if (existsSync(idFile)) idFromDisk = readFileSync(idFile, 'utf8').trim().toUpperCase();
+    
+    const idFromReg = getFallbackRegistry();
+
+    // Use existing ID if found in any vault
+    const finalId = idFromDisk || idFromReg || ('UNKNOWN-' + process.platform + '-' + crypto.randomBytes(4).toString('hex')).toUpperCase();
+
+    // Sync to all vaults
+    if (idFromDisk !== finalId) writeFileSync(idFile, finalId, 'utf8');
+    if (idFromReg !== finalId) saveFallbackRegistry(finalId);
+
+    return finalId;
+  } catch (err) {
+    console.error('Multi-vault fallback failed:', err);
+    return ('UNKNOWN-ID-' + process.platform).toUpperCase();
   }
 }
 
@@ -443,7 +479,7 @@ function startLicenseHeartbeat(machineId: string) {
             const reason = cloud.status === 'NOT_FOUND' ? "Votre licence a été supprimée par l'administrateur." : "Votre machine a été bloquée à distance."
             windows.forEach(win => {
                 if (!win.isDestroyed()) {
-                    win.webContents.send('license-deactivated', reason)
+                    safeSend(win, 'license-deactivated', reason)
                 }
             })
         }
@@ -869,7 +905,7 @@ async function ensureFfmpegAvailable(win?: BrowserWindow): Promise<string | null
     
     console.log('[FFmpeg] Successfully downloaded suite at:', userDataPath)
     if (win) {
-      win.webContents.send('notification', {
+      safeSend(win, 'notification', {
         title: 'Composants Vidéo Prêts',
         body: 'FFmpeg et FFprobe installés pour une qualité maximale.'
       })
@@ -880,7 +916,7 @@ async function ensureFfmpegAvailable(win?: BrowserWindow): Promise<string | null
   } catch (error) {
     console.error('[FFmpeg] Auto-download failed:', error)
     if (win) {
-       win.webContents.send('notification', {
+       safeSend(win, 'notification', {
         title: 'Erreur Composants',
         body: 'Échec du téléchargement de FFmpeg/FFprobe.'
       })
@@ -1236,7 +1272,7 @@ function createWindow(): void {
       const totalBytes = item.getTotalBytes()
 
       if (state === 'interrupted') {
-        mainWindow?.webContents.send('download-progress', {
+        safeSend(mainWindow, 'download-progress', {
           filename: item.getFilename(),
           url: item.getURL(),
           progress: totalBytes > 0 ? (receivedBytes / totalBytes) * 100 : 0,
@@ -1247,7 +1283,7 @@ function createWindow(): void {
         })
       } else if (state === 'progressing') {
         if (item.isPaused()) {
-          mainWindow?.webContents.send('download-progress', {
+          safeSend(mainWindow, 'download-progress', {
             filename: item.getFilename(),
             url: item.getURL(),
             progress: totalBytes > 0 ? (receivedBytes / totalBytes) * 100 : 0,
@@ -1275,7 +1311,7 @@ function createWindow(): void {
           tracker.lastTime = now
           tracker.lastProgress = Math.round(progress) // Store progress for pause
 
-          mainWindow?.webContents.send('download-progress', {
+          safeSend(mainWindow, 'download-progress', {
             filename: item.getFilename(),
             url: item.getURL(),
             progress,
@@ -1294,14 +1330,14 @@ function createWindow(): void {
       if (tracker) {
         tracker.savePath = item.getSavePath()
         if (state === 'completed') {
-          mainWindow?.webContents.send('download-complete', {
+          safeSend(mainWindow, 'download-complete', {
             filename: item.getFilename(),
             url: item.getURL(),
             state: 'finished',
             savePath: item.getSavePath()
           })
         } else {
-          mainWindow?.webContents.send('download-complete', {
+          safeSend(mainWindow, 'download-complete', {
             filename: item.getFilename(),
             url: item.getURL(),
             state: state === 'cancelled' ? 'cancelled' : 'error',
@@ -1309,7 +1345,9 @@ function createWindow(): void {
           })
         }
         // Keep tracker for a while to allow opening folder, then remove
-        setTimeout(() => activeDownloads.delete(url), 60000)
+        const isAudio = item.getURL().toLowerCase().endsWith('.mp3') || item.getURL().toLowerCase().endsWith('.m4a')
+        const trackerId = getTrackerId(item.getURL(), isAudio)
+        setTimeout(() => activeDownloads.delete(trackerId), 60000)
       }
     })
   })
@@ -1422,12 +1460,14 @@ function isSocialMediaURL(url: string): { isSocial: boolean; platform: string } 
 
 // Função para baixar ffmpeg automaticamente
 // [v1.6.3] Helper to generate unique filename (e.g. file(1).mp4)
-function getUniqueFilename(directory: string, filename: string): string {
-  // Ensure path is imported (it is imported at top of file, but just in case TS complains about scope)
+// [v2.0.0] Improved to avoid renames during resume
+function getUniqueFilename(directory: string, filename: string, isResume: boolean = false): string {
   const path = require('path')
   const fs = require('fs')
 
-  if (!fs.existsSync(join(directory, filename))) return filename
+  // If we are resuming and the exact filename already exists, keep it!
+  // This prevents video(1).mp4 on every restart.
+  if (isResume || !fs.existsSync(join(directory, filename))) return filename
 
   const ext = path.extname(filename)
   const name = path.basename(filename, ext)
@@ -1806,7 +1846,7 @@ function downloadSingleStreamWithRedirects(url: string, filePath: string, header
         if (shouldSendUpdate || isComplete) {
           tracker.lastProgressSent = Date.now()
           const sizeStr = formatSize(downloaded) + (totalSize > 0 ? ' / ' + formatSize(totalSize) : '')
-          win.webContents.send('download-progress', {
+          safeSend(win, 'download-progress', {
             url: tracker.originalUrl || url,
             filename: tracker.filename || 'download',
             progress: tracker.lastProgress,
@@ -1829,19 +1869,19 @@ function downloadSingleStreamWithRedirects(url: string, filePath: string, header
       // Try calling handleDownloadEnd if available in scope
       try { handleDownloadEnd(tracker?.originalUrl || url) } catch (e) { }
       if (tracker) tracker.status = 'completed'
-      win.webContents.send('download-complete', { url: tracker?.originalUrl || url, filePath })
+      safeSend(win, 'download-complete', { url: tracker?.originalUrl || url, filePath })
       resolvePromise()
     })
 
     res.on('error', (err: any) => {
       fileStream.close()
       fs.unlink(filePath, () => { })
-      win.webContents.send('download-error', { url, error: err.message })
+      safeSend(win, 'download-error', { url, error: err.message })
       rejectPromise(err)
     })
   })
   req.on('error', (err) => {
-    win.webContents.send('download-error', { url, error: err.message })
+    safeSend(win, 'download-error', { url, error: err.message })
     rejectPromise(err)
   })
   req.end()
@@ -1898,9 +1938,11 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
     // [v1.2.9] RESUME LOGIC: If a filename is already associated with this download, use it.
     // This prevents creating "video(1).mp4" upon resuming a paused download.
     const baseFilename = tracker?.filename || fileInfo.filename || 'download.mp4'
-    const uniqueFilename = (tracker?.filename && fs.existsSync(join(savePath, tracker.filename + '.part'))) 
-      ? tracker.filename 
-      : getUniqueFilename(savePath, baseFilename)
+    const isResuming = !!(tracker?.filename && (
+      fs.existsSync(join(savePath, tracker.filename + '.part')) || 
+      fs.existsSync(join(savePath, tracker.filename))
+    ))
+    const uniqueFilename = getUniqueFilename(savePath, baseFilename, isResuming)
 
     // Update tracker with actual filename
     if (tracker) tracker.filename = uniqueFilename
@@ -2000,7 +2042,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
                 tracker.lastProgress = Math.round(progress)
                 tracker.lastBytes = downloaded
                 tracker.lastTime = Date.now()
-                win.webContents.send('download-progress', {
+                safeSend(win, 'download-progress', {
                   url: url, // KEEP ORIGINAL URL FOR UI
                   audioOnly, // [v1.7.0] Distinguish format
                   progress: tracker.lastProgress,
@@ -2060,7 +2102,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
 
             if (shouldSendUpdate || isComplete) {
               tracker.lastProgressSent = Date.now()
-              win.webContents.send('download-progress', {
+              safeSend(win, 'download-progress', {
                 url,
                 filename: fileInfo.filename,
                 progress: tracker.lastProgress,
@@ -2079,17 +2121,17 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
         fileStream.on('finish', () => {
           fileStream.close()
           handleDownloadEnd(url)
-          win.webContents.send('download-complete', { url, filePath })
+          safeSend(win, 'download-complete', { url, filePath })
         })
 
         fileStream.on('error', (err: any) => {
           fs.unlink(filePath, () => { })
-          win.webContents.send('download-error', { url, error: err.message })
+          safeSend(win, 'download-error', { url, error: err.message })
         })
       })
 
       req.on('error', (err: any) => {
-        win.webContents.send('download-error', { url, error: err.message })
+        safeSend(win, 'download-error', { url, error: err.message })
       })
       req.end()
       return
@@ -2182,7 +2224,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
           })
 
           const req = protocol.request(options, (res: any) => {
-            const trackerStart = activeDownloads.get(url)
+            const trackerStart = activeDownloads.get(trackerId)
             if (trackerStart?.paused || trackerStart?.cancelled) {
               req.destroy()
               resolve()
@@ -2198,7 +2240,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
               }
 
               res.on('data', (chunk: Buffer) => {
-                const trackerData = activeDownloads.get(url)
+                const trackerData = activeDownloads.get(trackerId)
                 if (trackerData?.paused || trackerData?.cancelled) {
                   req.destroy()
                   fileStream.close()
@@ -2210,7 +2252,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
                 fileStream.write(chunk)
                 segmentDownloaded += chunk.length
 
-              const tracker = activeDownloads.get(url)
+              const tracker = activeDownloads.get(trackerId)
               if (tracker && !tracker.paused && !tracker.cancelled) {
                 // Update specific segment progress
                 if (tracker.segmentProgress) {
@@ -2238,7 +2280,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
 
                 if (shouldSendUpdate || isComplete) {
                   tracker.lastProgressSent = Date.now()
-                  win.webContents.send('download-progress', {
+                  safeSend(win, 'download-progress', {
                     filename: fileInfo.filename,
                     url: url,
                     progress: tracker.lastProgress,
@@ -2299,7 +2341,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
 
     const trackerFinal = activeDownloads.get(url)
     if (trackerFinal?.cancelled) {
-      win.webContents.send('download-cancelled', { url })
+      safeSend(win, 'download-cancelled', { url })
       handleDownloadEnd(url)
       return
     }
@@ -2310,7 +2352,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
     // Inform user that we are finalizing
     if (trackerFinal) {
       trackerFinal.statusMessage = 'Finalizing: Zero-copy output ready.'
-      win.webContents.send('download-progress', {
+      safeSend(win, 'download-progress', {
         url,
         progress: 100,
         state: 'downloading',
@@ -2324,7 +2366,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
     // [v1.7.2] NO MERGING NEEDED! The file was written at its offsets during download.
     if (trackerFinal) {
         trackerFinal.statusMessage = 'Finalizing: Verifying file...'
-        win.webContents.send('download-progress', {
+        safeSend(win, 'download-progress', {
           url,
           progress: 100,
           state: 'downloading',
@@ -2348,7 +2390,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
       console.error('[MultiThread] Failed to move from temp:', renameErr)
     }
 
-    win.webContents.send('download-complete', {
+    safeSend(win, 'download-complete', {
       filename: fileInfo.filename,
       url: url,
       state: 'finished',
@@ -2386,7 +2428,7 @@ async function downloadWithMultiThreading(url: string, savePath: string, win: Br
 
     if (tracker) {
       tracker.strategy = 'yt-dlp'
-      win.webContents.send('download-status', { url, status: 'Falling back to safe mode...' })
+      safeSend(win, 'download-status', { url, status: 'Falling back to safe mode...' })
       // Retry with yt-dlp using captured headers and PRESERVE filename/audioOnly
       await downloadWithYtDlp(url, savePath, 'SafeMode', win, undefined, tracker?.filename || 'Generic', false, !!audioOnly, tracker?.headers)
       return
@@ -2472,8 +2514,17 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
   const { url, savePath, mainWindow } = queuedItem
   const downloadPath = savePath || appSettings.downloadPath
   
-  // INITIAL TRACKER (to mark as active IMMEDIATELY and prevent race conditions)
-  const initialTracker: DownloadTracker = {
+  const trackerId = getTrackerId(url, !!queuedItem.audioOnly)
+  
+  // [v1.9.3] Re-use existing tracker if created during restoration to preserve progress/size
+  const existingTracker = activeDownloads.get(trackerId)
+  const initialTracker: DownloadTracker = existingTracker ? {
+    ...existingTracker,
+    paused: false,
+    cancelled: false,
+    process: null,
+    httpRequests: []
+  } : {
     item: null,
     url: url,
     startTime: Date.now(),
@@ -2488,12 +2539,11 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
     strategy: 'direct' // Default
   }
 
+  activeDownloads.set(trackerId, initialTracker)
+
   try {
     // USE PLUGIN SYSTEM
     const plugin = pluginManager.getPlugin(url)
-
-    const trackerId = getTrackerId(url, !!queuedItem.audioOnly)
-    activeDownloads.set(trackerId, initialTracker)
 
     // Default Routing Logic (if no plugin found)
     let strategy = 'direct'
@@ -2651,7 +2701,7 @@ async function startDownloadFromQueue(queuedItem: QueuedDownload) {
 
     // Échec définitif
     const errorMessage = error.message || 'Failed to download file'
-    mainWindow.webContents.send('download-error', {
+    safeSend(mainWindow, 'download-error', {
       url,
       audioOnly: !!queuedItem.audioOnly,
       error: errorMessage
@@ -2727,7 +2777,7 @@ function addToDownloadQueue(
   // [v1.6.8] Validate URL Protocol
   if (url.startsWith('blob:') || url.startsWith('data:')) {
     console.warn(`[Queue] Blocked unsupported URL protocol: ${url.split(':')[0]}`)
-    mainWindow.webContents.send('notification', {
+    safeSend(mainWindow, 'notification', {
       title: 'Téléchargement impossible',
       body: 'Les liens "blob:" (ChatGPT, etc.) ne peuvent pas être téléchargés directement. Veuillez clic-droit sur le fichier dans votre navigateur et choisir "Enregistrer sous".'
     })
@@ -2737,17 +2787,36 @@ function addToDownloadQueue(
   // [v1.6.9] Enforcement: Block downloads if not activated
   if (!appSettings.isActivated) {
     console.warn(`[Queue] Blocked download because app is not activated: ${url}`)
-    mainWindow.webContents.send('notification', {
+    safeSend(mainWindow, 'notification', {
       title: 'Activation Requise',
       body: 'Veuillez activer votre licence pour débloquer les téléchargements.'
     })
     // Also open the settings modal to guide the user
-    mainWindow.webContents.send('open-settings') 
+    safeSend(mainWindow, 'open-settings') 
     return
   }
 
-  // Vérifier si déjà dans la queue ou actif - [v1.7.0] Composite check
+  // [v1.7.0] Composite check
   const trackerId = getTrackerId(url, audioOnly)
+
+  // [v1.9.4] SMART RESUME: Detect if this is a "re-capture" of an expired/failed download
+  const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  const newNormalizedName = normalize(filename || '');
+  
+  if (filename) {
+    for (const [id, tracker] of activeDownloads.entries()) {
+      if (tracker.filename && normalize(tracker.filename) === newNormalizedName && id !== trackerId) {
+        // If the existing one is failed/expired, remove it to avoid duplicates
+        if (tracker.statusMessage?.includes('expiré') || tracker.statusMessage?.includes('Forbidden') || tracker.statusMessage?.includes('Error')) {
+           console.log(`[SmartResume] Found expired duplicate for ${filename}. Cleaning up old tracker: ${id}`);
+           activeDownloads.delete(id);
+           safeSend(mainWindow, 'download-removed', { url: tracker.url, audioOnly: tracker.audioOnly });
+        }
+      }
+    }
+  }
+
+  // Vérifier si déjà dans la queue ou actif - [v1.7.0] Composite check
   if (downloadQueue.some((item) => getTrackerId(item.url, !!item.audioOnly) === trackerId) || activeDownloads.has(trackerId)) {
     console.log('Download already queued or active (Composite):', trackerId)
     return
@@ -2787,7 +2856,7 @@ function addToDownloadQueue(
   // const isRetry = false;
   const name = filename || url.split('/').pop()?.split('?')[0] || 'unknown-file'
 
-  mainWindow.webContents.send('download-started', {
+  safeSend(mainWindow, 'download-started', {
     url,
     audioOnly, // [v1.7.0] CRITICAL: Sync flag to prevent UI duplicates
     name: name,
@@ -2806,6 +2875,10 @@ function addToDownloadQueue(
 // Fonction pour gérer la fin d'un téléchargement (succès, erreur, annulation)
 // [v1.7.0] Force handleDownloadEnd to use trackerId or search if audioOnly is unknown
 function handleDownloadEnd(url: string, audioOnly?: boolean) {
+  // [v1.9.5] CRITICAL SHUTDOWN PROTECTION:
+  // If the app is quitting, do NOT delete trackers. We want them saved!
+  if (isAppQuitting) return
+
   const trackerId = audioOnly !== undefined ? getTrackerId(url, audioOnly) : url
   const tracker = activeDownloads.get(trackerId) || activeDownloads.get(url)
 
@@ -2861,7 +2934,7 @@ async function stopDownload(url: string, audioOnly: boolean = false) {
     // Notify frontend
     const mainWindow = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
     if (mainWindow) {
-      mainWindow.webContents.send('download-cancelled', { 
+      safeSend(mainWindow, 'download-cancelled', { 
         url,
         audioOnly: !!audioOnly
       })
@@ -2949,7 +3022,7 @@ async function downloadWithYtDlp(
 
         // 1. Strip ALL format ID patterns like .f299, .f140, .f137, etc.
         // We do this globally to clean the title completely
-        finalCustomFilename = finalCustomFilename.replace(/\.f\d+/g, '')
+        // finalCustomFilename = finalCustomFilename.replace(/\.f\d+/g, '')
 
         // [Fix] FORCE IGNORE BAD TITLES -> Nuclear Option
         // If we see "Swift..." or "video", we DO NOT trust yt-dlp metadata either (because it might be the same).
@@ -2977,7 +3050,7 @@ async function downloadWithYtDlp(
 
             if (seriesHint) {
               console.log(`[Series Fix] Detected metadata: ${seriesHint}`);
-              finalCustomFilename = `${finalCustomFilename}_${seriesHint}`;
+              // finalCustomFilename = `${finalCustomFilename}_${seriesHint}`;
             }
           } else {
             console.log(`[Series Fix] Skipping enrichment: filename already contains metadata.`);
@@ -3000,12 +3073,28 @@ async function downloadWithYtDlp(
                    fs.existsSync(base + '.mp4.part');
           };
 
-          if (!(tracker?.filename && (fs.existsSync(join(savePath, tracker.filename + '.part')) || fs.existsSync(join(savePath, tracker.filename + '.ytdl'))))) {
-            while (isTaken(checkName)) {
-              checkName = `${finalCustomFilename}(${counter})`;
-              counter++;
+          if (!(tracker?.filename && (
+            fs.existsSync(join(savePath, tracker.filename + '.part')) || 
+            fs.existsSync(join(savePath, tracker.filename + '.ytdl')) ||
+            fs.existsSync(join(savePath, tracker.filename))
+          ))) {
+            // [v1.9.4] Before shifting to a new name (1), check if a .part file exists for the base name
+            // and if NO OTHER ACTIVE download is using it.
+            const basePartExists = fs.existsSync(join(savePath, checkName + '.part')) || 
+                                 fs.existsSync(join(savePath, checkName + '.mp4.part')) ||
+                                 fs.existsSync(join(savePath, checkName + '.ytdl'));
+            const isNameGloballyTaken = Array.from(activeDownloads.values()).some(t => t.filename === checkName && !t.paused && t.process);
+            
+            if (basePartExists && !isNameGloballyTaken) {
+               console.log(`[yt-dlp] Base .part file found for ${checkName} and slot is free. Using it for resume.`);
+               finalCustomFilename = checkName;
+            } else {
+              while (isTaken(checkName)) {
+                checkName = `${finalCustomFilename}(${counter})`;
+                counter++;
+              }
+              finalCustomFilename = checkName;
             }
-            finalCustomFilename = checkName;
           } else {
             finalCustomFilename = tracker.filename;
             console.log(`[yt-dlp] Resuming with existing filename: ${finalCustomFilename}`);
@@ -3055,17 +3144,16 @@ async function downloadWithYtDlp(
         */
       }
 
-      // Arguments de base pour yt-dlp
       const downloadArgs = [
         cleanUrl, // [v1.7.2] Using clean URL
-        '-o',
-        // USE FLEXIBLE TEMPLATE: Try to get real title, fallback to custom filename if available
-        // [v1.7.0] Sanitize finalCustomFilename: Strip ANY existing media extensions to prevent .mp3.webm
-        finalCustomFilename
-          ? join(savePath, `${finalCustomFilename.replace(/\.(mp3|mp4|webm|m4a|mkv)$/i, '')}.%(ext)s`)
-          : join(savePath, '%(title)s.%(ext)s'),
-        '--part', // Ensure .part files are used
+        '--paths', `home:${savePath}`, // [v1.9.8] Set base directory to avoid absolute path warnings
         '--paths', `temp:${tempDir}`, // [v1.3.6] Force temp files to the same disk
+        '-o',
+        // [v1.9.8] Use relative template because base directory is now set via --paths home
+        finalCustomFilename
+          ? `${finalCustomFilename.replace(/\.(mp3|mp4|webm|m4a|mkv)$/i, '')}.%(ext)s`
+          : '%(title)s.%(ext)s',
+        '--part', // Ensure .part files are used
         // '--restrict-filenames', // REMOVED: Allow nice filenames with spaces/UTF-8
         '--newline', // Important for parsing output
         '--no-mtime', // Ne pas restaurer la date de modif (perf Windows)
@@ -3151,7 +3239,7 @@ async function downloadWithYtDlp(
             downloadArgs.push('-f', 'best')
             console.warn('[yt-dlp] YouTube: FFmpeg missing. Falling back to single-file format (Limited to 720p)')
             if (win) {
-              win.webContents.send('notification', {
+              safeSend(win, 'notification', {
                 title: 'Qualité limitée',
                 body: 'FFmpeg absent : qualité limitée à 720p max.'
               })
@@ -3166,7 +3254,7 @@ async function downloadWithYtDlp(
             // CRITICAL: m3u8 requires FFmpeg. Without it, it just downloads a tiny text file or fails.
             console.error('[yt-dlp] m3u8 detected but FFmpeg is missing! High risk of failure.')
             if (win) {
-              win.webContents.send('notification', {
+              safeSend(win, 'notification', {
                 title: 'FFmpeg requis',
                 body: 'FFmpeg est indispensable pour ce site. Tentative de téléchargement en cours...'
               })
@@ -3275,7 +3363,7 @@ async function downloadWithYtDlp(
 
       // Emit START event to ensure UI registers the item in the list
       const initialFilename = customFilename || 'Fetching info...'
-      win.webContents.send('download-started', {
+      safeSend(win, 'download-started', {
         url: url,
         audioOnly,
         name: initialFilename,
@@ -3594,7 +3682,7 @@ async function downloadWithYtDlp(
                   } else if (trimmedLine.includes('[download] 100% of')) {
                       // [v1.9.30] DEFER state: 'finished' until process actually exits
                       // This avoids the "hang at 100%" impression during FFmpeg merge/fixup.
-                      win.webContents.send('download-progress', {
+                      safeSend(win, 'download-progress', {
                         url, 
                         audioOnly,
                         progress: 100, 
@@ -3711,7 +3799,7 @@ async function downloadWithYtDlp(
 
                       if (displayPercentage >= 100) {
                         if (!win.isDestroyed()) {
-                          win.webContents.send('download-progress', {
+                          safeSend(win, 'download-progress', {
                             url,
                             audioOnly,
                             progress: 100,
@@ -3730,7 +3818,7 @@ async function downloadWithYtDlp(
                         }
                       } else {
                         if (!win.isDestroyed()) {
-                          win.webContents.send('download-progress', {
+                          safeSend(win, 'download-progress', {
                             url,
                             audioOnly,
                             progress: displayPercentage,
@@ -3764,7 +3852,7 @@ async function downloadWithYtDlp(
                 errorOutput += errChunk
                 console.error('[yt-dlp] stderr:', errChunk)
 
-                const trackerLog = activeDownloads.get(url)
+                const trackerLog = activeDownloads.get(trackerId)
                 if (trackerLog) {
                   if (!trackerLog.logs) trackerLog.logs = []
                   trackerLog.logs.push('ERR: ' + errChunk)
@@ -3801,14 +3889,14 @@ async function downloadWithYtDlp(
                   unhideFile(finalPath);
 
                   if (!win.isDestroyed()) {
-                    win.webContents.send('download-complete', {
+                    safeSend(win, 'download-complete', {
                       url, filePath: finalPath, filename, totalBytes: fileSize, state: 'finished'
                     })
-                    win.webContents.send('notification', { title: 'Terminé', body: filename })
+                    safeSend(win, 'notification', { title: 'Terminé', body: filename })
                   }
                   resolve(true)
                 } else {
-                  const tracker = activeDownloads.get(url)
+                  const tracker = activeDownloads.get(trackerId)
                   if (tracker && (tracker.paused || tracker.cancelled)) {
                     reject(new Error('Cancelled'))
                   } else {
@@ -3816,8 +3904,8 @@ async function downloadWithYtDlp(
                     let errorMessage = `Exit code ${code}`
                     if (errorOutput.includes('Unsupported URL')) {
                       errorMessage = 'URL non supportée (Ce n\'est pas une vidéo)'
-                    } else if (errorOutput.includes('Sign in') || errorOutput.includes('403')) {
-                      console.log('Retry-able error detected')
+                    } else if (errorOutput.includes('Sign in') || errorOutput.includes('403') || errorOutput.includes('Forbidden')) {
+                      errorMessage = 'Lien expiré. Veuillez capturer à nouveau l\'épisode sur le site.'
                     } else if (errorOutput.includes('Video unavailable')) {
                       errorMessage = 'Vidéo indisponible (Supprimée ou privée)'
                     }
@@ -3872,10 +3960,13 @@ async function downloadWithYtDlp(
     // [v1.2.9] CRITICAL FIX: Do NOT swallow error! Re-throw it so caller (queue manager) can handle retry.
     // Also do NOT call handleDownloadEnd(url) here, as it removes the tracker prematurely.
     
-    // [v1.7.7] FAILURE CLEANUP: If all retries failed, don't leave mess
-    if (savePath) {
+    // [v1.9.7] PROTECTIVE PERSISTENCE: Never auto-cleanup on failure anymore.
+    // We want to keep .part files even if the link expired so we can resume later.
+    /*
+    if (savePath && !error.message.includes('Lien expiré')) {
         cleanupDebris(savePath, tracker?.filename || customFilename || 'download')
     }
+    */
 
     throw error
   } finally {
@@ -4163,7 +4254,7 @@ function startExtensionServer() {
           console.log(`📦 Batch Download received: ${playlistTitle} (${items.length} items)`)
 
           // [v1.6.0] Items now arrive with resolved CDN URLs from extension click-and-capture
-          mainWindow.webContents.send('external-batch', {
+          safeSend(mainWindow, 'external-batch', {
             playlistTitle,
             items: items.map((item: any, idx: number) => ({
               id: `ext-${idx}-${Date.now()}`,
@@ -4288,7 +4379,7 @@ function startExtensionServer() {
           const windows = BrowserWindow.getAllWindows()
           const mainWindow = windows.find((w) => !w.isDestroyed())
           if (mainWindow) {
-            mainWindow.webContents.send('download-pause', data.url, !!data.audioOnly)
+            safeSend(mainWindow, 'download-pause', data.url, !!data.audioOnly)
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
@@ -4311,7 +4402,7 @@ function startExtensionServer() {
           const windows = BrowserWindow.getAllWindows()
           const mainWindow = windows.find((w) => !w.isDestroyed())
           if (mainWindow) {
-            mainWindow.webContents.send('download-resume', data.url, undefined, undefined, !!data.audioOnly)
+            safeSend(mainWindow, 'download-resume', data.url, undefined, undefined, !!data.audioOnly)
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
@@ -4334,7 +4425,7 @@ function startExtensionServer() {
           const windows = BrowserWindow.getAllWindows()
           const mainWindow = windows.find((w) => !w.isDestroyed())
           if (mainWindow) {
-            mainWindow.webContents.send('download-cancel', data.url, !!data.audioOnly)
+            safeSend(mainWindow, 'download-cancel', data.url, !!data.audioOnly)
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
@@ -4625,7 +4716,7 @@ app.whenReady().then(() => {
         finalAudioOnly
       )
     } catch (error: any) {
-      win.webContents.send('download-error', {
+      safeSend(win, 'download-error', {
         url,
         error: error.message || 'Failed to start download'
       })
@@ -4645,7 +4736,7 @@ app.whenReady().then(() => {
       processDownloadQueue()
 
       // Send the last known progress percentage when pausing
-      win?.webContents.send('download-paused', {
+      safeSend(win, 'download-paused', {
         url,
         audioOnly,
         progress: tracker.lastProgress !== undefined ? tracker.lastProgress : 0
@@ -4670,7 +4761,7 @@ app.whenReady().then(() => {
       // Update count and process queue on pause
       processDownloadQueue()
 
-      win?.webContents.send('download-paused', {
+      safeSend(win, 'download-paused', {
         url,
         progress: tracker.lastProgress !== undefined ? Math.round(tracker.lastProgress) : 0
       })
@@ -4721,7 +4812,7 @@ app.whenReady().then(() => {
       }
 
       // Send the last known progress percentage when pausing
-      win?.webContents.send('download-paused', {
+      safeSend(win, 'download-paused', {
         url,
         audioOnly,
         progress: tracker.lastProgress !== undefined ? tracker.lastProgress : 0
@@ -4749,22 +4840,62 @@ app.whenReady().then(() => {
       }
 
       console.log(`[Resume] Tracker missing for ${url}, recreating (Strategy: ${strategy})...`)
+      
+      // [v1.9.6] DISK CHECK: Try to find existing progress even for newly created tracker
+      let recoveredBytes = 0
+      if (filename) {
+        const tempDir = join(savePath, '.doulget_tmp')
+        const possiblePaths = [
+          join(savePath, filename),
+          join(savePath, `${filename}.part`),
+          join(tempDir, filename),
+          join(tempDir, `${filename}.part`),
+          join(tempDir, `${filename}.ytdl`)
+        ]
+        for (const p of possiblePaths) {
+          if (fs.existsSync(p)) {
+            recoveredBytes = fs.statSync(p).size
+            console.log(`[Resume] Found partial file on disk: ${p} (${recoveredBytes} bytes)`)
+            break
+          }
+        }
+      }
+
       tracker = {
         item: null,
         url: url,
         startTime: Date.now(),
-        lastBytes: 0,
+        lastBytes: recoveredBytes, // [v1.9.6] Load existing progress
         lastTime: Date.now(),
         savePath: savePath,
         isYouTube: url.includes('youtube.com') || url.includes('youtu.be'),
         filename: filename,
         paused: true,
         strategy: strategy,
-        audioOnly: audioOnly // [v1.7.0] Use passed flag
+        audioOnly: audioOnly 
       }
       activeDownloads.set(trackerId, tracker)
     } else if (tracker) {
-      console.log(`[Resume] Found existing tracker for ${trackerId}. Progress: ${tracker.lastProgress}%, Strategy: ${tracker.strategy}`)
+      console.log(`[Resume] Found existing tracker for ${trackerId}. Progress: ${tracker.lastProgress || 0}%, Strategy: ${tracker.strategy}`)
+      
+      // [v1.9.6] DISK CHECK: If tracker exists but progress is 0, double check disk
+      if ((tracker.lastBytes || 0) === 0 && tracker.filename && tracker.savePath) {
+        const tempDir = join(tracker.savePath, '.doulget_tmp')
+        const possiblePaths = [
+          join(tracker.savePath, tracker.filename),
+          join(tracker.savePath, `${tracker.filename}.part`),
+          join(tempDir, tracker.filename),
+          join(tempDir, `${tracker.filename}.part`),
+          join(tempDir, `${tracker.filename}.ytdl`)
+        ]
+        for (const p of possiblePaths) {
+          if (fs.existsSync(p)) {
+            tracker.lastBytes = fs.statSync(p).size
+            console.log(`[Resume] Corrected tracker progress from disk: ${tracker.lastBytes} bytes`)
+            break
+          }
+        }
+      }
     }
 
     // Cas 1 : téléchargement "classique" géré par Electron
@@ -4778,7 +4909,7 @@ app.whenReady().then(() => {
         tracker.lastBytes = tracker.item.getReceivedBytes()
         tracker.lastTime = Date.now()
       }
-      win?.webContents.send('download-resumed', { url, audioOnly })
+      safeSend(win, 'download-resumed', { url, audioOnly })
       return
     }
 
@@ -4796,7 +4927,7 @@ app.whenReady().then(() => {
       const currentProgress = tracker.lastProgress || 0
       const currentBytes = tracker.lastBytes || 0
 
-      win?.webContents.send('download-progress', {
+      safeSend(win, 'download-progress', {
         url: url,
         audioOnly,
         progress: currentProgress,
@@ -4810,7 +4941,7 @@ app.whenReady().then(() => {
         filename: tracker.filename
       })
 
-      win?.webContents.send('download-resumed', { url, audioOnly })
+      safeSend(win, 'download-resumed', { url, audioOnly })
         ; (async () => {
           try {
             const { platform } = isSocialMediaURL(url)
@@ -4825,7 +4956,7 @@ app.whenReady().then(() => {
               audioOnly // [v1.7.0] Correct format
             )
           } catch (error: any) {
-            win?.webContents.send('download-error', {
+            safeSend(win, 'download-error', {
               url,
               audioOnly,
               error: error.message || 'Failed to resume download'
@@ -4844,7 +4975,7 @@ app.whenReady().then(() => {
       const currentProgress = tracker.lastProgress || 0
       const currentBytes = tracker.lastBytes || 0
 
-      win?.webContents.send('download-progress', {
+      safeSend(win, 'download-progress', {
         url: url,
         audioOnly,
         progress: currentProgress,
@@ -4858,7 +4989,7 @@ app.whenReady().then(() => {
         filename: tracker.filename
       })
 
-      win?.webContents.send('download-resumed', { url, audioOnly })
+      safeSend(win, 'download-resumed', { url, audioOnly })
 
         // Relancer le téléchargement multi-threaded
         ; (async () => {
@@ -4867,7 +4998,7 @@ app.whenReady().then(() => {
               await downloadWithMultiThreading(url, tracker.savePath!, win, audioOnly)
             }
           } catch (error: any) {
-            win?.webContents.send('download-error', {
+            safeSend(win, 'download-error', {
               url,
               audioOnly,
               error: error.message || 'Failed to resume download'
@@ -5174,7 +5305,7 @@ app.whenReady().then(() => {
         const reason = cloud.status === 'NOT_FOUND' ? "Votre licence a été supprimée par l'administrateur." : "Votre machine a été suspendue (BANNIE)."
         windows.forEach(win => {
             if (!win.isDestroyed()) {
-                win.webContents.send('license-deactivated', reason)
+                safeSend(win, 'license-deactivated', reason)
             }
         })
 
@@ -5244,6 +5375,9 @@ app.whenReady().then(() => {
     console.log(`[Update] Starting download from: ${downloadUrl}`);
     console.log(`[Update] Target path: ${tempPath}`);
 
+    // [v1.8.5] Use a browser-like User-Agent for GitHub/CDN redirects
+    const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
     const downloadFile = (url: string, redirectCount = 0): Promise<{ success: boolean, error?: string }> => {
         if (redirectCount > 5) {
             return Promise.resolve({ success: false, error: 'Trop de redirections' });
@@ -5254,7 +5388,12 @@ app.whenReady().then(() => {
                 // Remove old update if exists on first call
                 if (redirectCount === 0 && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
 
-                const request = https.get(url, (response) => {
+                // [v1.8.5] Added User-Agent header (required by GitHub)
+                const options = {
+                    headers: { 'User-Agent': USER_AGENT }
+                };
+
+                const request = https.get(url, options, (response) => {
                     // Handle Redirects (301, 302, 307, 308)
                     if ([301, 302, 307, 308].includes(response.statusCode || 0) && response.headers.location) {
                         console.log(`[Update] Redirecting to: ${response.headers.location}`);
@@ -5323,14 +5462,14 @@ app.whenReady().then(() => {
 
     console.log('[Update] Launching installer and quitting...');
     
-    // Launch installer detached and quit
-    const { spawn } = require('child_process');
-    spawn(tempPath, [], {
-        detached: true,
-        stdio: 'ignore'
-    }).unref();
+    // [v1.8.2] Use shell.openPath instead of spawn for better Windows permission handling
+    shell.openPath(tempPath).then(() => {
+        // Short delay to ensure shell process starts before quitting
+        setTimeout(() => app.quit(), 500);
+    }).catch(err => {
+        console.error('[Update] Failed to open installer:', err);
+    });
 
-    app.quit();
     return { success: true };
   })
 
@@ -5475,7 +5614,7 @@ app.whenReady().then(() => {
           activeDownloads.set(trackerId, tracker)
           await downloadWithYtDlp(url, downloadPath, platform, win, undefined, undefined, false, audioOnly)
         } catch (error: any) {
-          win.webContents.send('download-error', {
+          safeSend(win, 'download-error', {
             url,
             error: error.message || 'Failed to download'
           })
@@ -5504,7 +5643,7 @@ app.whenReady().then(() => {
           activeDownloads.set(trackerId, tracker)
           await downloadWithMultiThreading(url, downloadPath, win, audioOnly)
         } catch (error: any) {
-          win.webContents.send('download-error', {
+          safeSend(win, 'download-error', {
             url,
             error: error.message || 'Failed to download'
           })
@@ -5576,7 +5715,7 @@ app.whenReady().then(() => {
           if (timeMatch && duration > 0) {
             const currentTime = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3])
             const progress = Math.min(Math.round((currentTime / duration) * 100), 99)
-            BrowserWindow.getAllWindows()[0]?.webContents.send('conversion-progress', { progress, filename: outputName })
+            safeSend(BrowserWindow.getAllWindows()[0], 'conversion-progress', { progress, filename: outputName })
           }
         })
 
@@ -5653,7 +5792,7 @@ app.whenReady().then(() => {
           if (timeMatch && duration > 0) {
             const currentTime = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3])
             const progress = Math.min(Math.round((currentTime / duration) * 100), 99)
-            BrowserWindow.getAllWindows()[0]?.webContents.send('compression-progress', { progress, filename: outputName })
+            safeSend(BrowserWindow.getAllWindows()[0], 'compression-progress', { progress, filename: outputName })
           }
         })
 
@@ -5813,7 +5952,7 @@ app.whenReady().then(() => {
       )
     })
 
-    win.webContents.send('notification', {
+    safeSend(win, 'notification', {
       title: 'Batch Downloader',
       body: `${items.length} vidéos ajoutées à la file d'attente.`
     })
@@ -5827,40 +5966,58 @@ app.whenReady().then(() => {
 
   // [v1.4.1] Restore active downloads from previous session
   setTimeout(() => {
-    console.log('[PERSISTENCE] Restoring active downloads from previous session')
-    restoreActiveDownloads()
+    if (mainWindow) {
+      console.log('[PERSISTENCE] Restoring active downloads from previous session')
+      restoreActiveDownloads(mainWindow)
+    }
   }, 2000) // Give app time to fully initialize
 })
 
-// [v1.4.1] Save active downloads before app quits
+// [v1.4.1] Save active and queued downloads before app quits
 function saveActiveDownloads() {
   try {
     const persistencePath = join(app.getPath('userData'), 'active-downloads.json')
 
-    // Serialize only serializable parts of activeDownloads
-    const downloadsToSave = Array.from(activeDownloads.entries())
+    // [v1.9.5] Persist ACTIVE downloads (Trackers)
+    const activeToSave = Array.from(activeDownloads.entries())
       .filter(([_, tracker]) =>
-        // Only save downloads that are actually active (not finished/cancelled)
-        // ALLOW undefined lastProgress for downloads that haven't started yet
+        // Only save downloads that aren't finished (100%) and aren't cancelled
         (tracker.lastProgress === undefined || tracker.lastProgress < 100) &&
         !tracker.cancelled &&
-        tracker.url &&
-        tracker.filename
+        tracker.url 
+        // Note: filename check removed/relaxed to ensure all starting downloads are kept
       )
       .map(([id, tracker]) => ({
-        url: tracker.url || id.split('|')[0], // [v1.2.9] FIX: Use REAL URL from tracker instead of Map Key
+        url: tracker.url || id.split('|')[0],
         filename: tracker.filename || 'download',
         savePath: tracker.savePath || appSettings.downloadPath,
         receivedBytes: tracker.lastBytes || 0,
         totalBytes: tracker.totalBytes || 0,
         headers: tracker.headers || {},
         strategy: tracker.strategy || 'direct',
-        audioOnly: !!tracker.audioOnly, // [v1.7.0] Persist format
-        timestamp: tracker.startTime || Date.now()
+        audioOnly: !!tracker.audioOnly,
+        timestamp: tracker.startTime || Date.now(),
+        isQueued: false
       }))
 
-    fs.writeFileSync(persistencePath, JSON.stringify({ downloads: downloadsToSave }, null, 2), 'utf-8')
-    console.log(`[PERSISTENCE] Saved ${downloadsToSave.length} active downloads`)
+    // [v1.9.5] Persist QUEUED downloads (Waiting for slot)
+    const queuedToSave = downloadQueue.map(item => ({
+       url: item.url,
+       filename: item.filename || 'download',
+       savePath: item.savePath || appSettings.downloadPath,
+       receivedBytes: 0,
+       totalBytes: 0,
+       headers: item.headers || {},
+       strategy: 'direct', // Will be determined on start
+       audioOnly: !!item.audioOnly,
+       timestamp: Date.now(),
+       isQueued: true
+    }))
+
+    const allDownloads = [...activeToSave, ...queuedToSave]
+
+    fs.writeFileSync(persistencePath, JSON.stringify({ downloads: allDownloads }, null, 2), 'utf-8')
+    console.log(`[PERSISTENCE] Saved ${allDownloads.length} downloads (${activeToSave.length} active, ${queuedToSave.length} queued)`)
 
     // CLEANUP: Kill all active processes to ensure clean exit
     activeDownloads.forEach((tracker) => {
@@ -5891,7 +6048,7 @@ function saveActiveDownloads() {
 }
 
 // [v1.4.1] Restore active downloads from saved state
-function restoreActiveDownloads() {
+function restoreActiveDownloads(win: BrowserWindow) {
   try {
     const persistencePath = join(app.getPath('userData'), 'active-downloads.json')
 
@@ -5907,10 +6064,9 @@ function restoreActiveDownloads() {
       return
     }
 
-    // Get main window for callbacks
-    const win = BrowserWindow.getAllWindows()[0]
-
+    // Get main window for callbacks (passed as parameter)
     console.log(`[PERSISTENCE] Attempting to restore ${data.downloads.length} downloads`)
+    const recoveredFiles = new Set<string>(); // [v1.9.3] Track files already mapped to avoid duplicates
 
     data.downloads.forEach((download: any) => {
       const trackerId = getTrackerId(download.url, !!download.audioOnly)
@@ -5922,17 +6078,21 @@ function restoreActiveDownloads() {
       }
 
       // Check if partial file exists
+      const tempDir = join(download.savePath, '.doulget_tmp')
       const possibleFilePaths = [
         join(download.savePath, download.filename),
         join(download.savePath, `${download.filename}.part`),
-        join(download.savePath, download.filename + '.tmp')
+        join(download.savePath, download.filename + '.tmp'),
+        join(tempDir, download.filename),
+        join(tempDir, `${download.filename}.part`),
+        join(tempDir, download.filename + '.ytdl')
       ]
 
       let existingFilePath: string | null = null
       let existingFileSize = 0
 
       for (const filePath of possibleFilePaths) {
-        if (fs.existsSync(filePath)) {
+        if (fs.existsSync(filePath) && !recoveredFiles.has(filePath)) { // [v1.9.3] Check unique
           existingFilePath = filePath
           existingFileSize = fs.statSync(filePath).size
           break
@@ -5940,45 +6100,83 @@ function restoreActiveDownloads() {
       }
 
       // SMART RECOVERY: Fuzzy search for the file if exact match failed
-      // This handles cases where yt-dlp appended format IDs (f137), sanitized chars differently, or added .part
       if (!existingFilePath) {
         try {
-          if (fs.existsSync(download.savePath)) {
-            const files = fs.readdirSync(download.savePath);
+          // [v1.9.6] Scan both root and .doulget_tmp
+          const searchDirs = [download.savePath, join(download.savePath, '.doulget_tmp')]
+          
+          for (const sDir of searchDirs) {
+            if (!fs.existsSync(sDir)) continue;
+            const files = fs.readdirSync(sDir);
 
             // Normalization function: Remove accents, keep only alphanum, lowercase
             const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
 
             // Create a reliable fingerprint from the SAVED filename
-            // We take the first 15 alphanum chars - usually safe from suffix/encoding variations at the end
             const rawName = download.filename.replace(/\.[a-z0-9]+$/, '').replace(/\.part$/, '');
             const normalizedTarget = normalize(rawName);
-            const fingerprint = normalizedTarget.substring(0, 15); // First 15 chars are usually stable
+            
+            // [v1.9.3] STRENGTHENED FINGERPRINT: First 15 + Last 5 (often contains Ep number)
+            const prefix = normalizedTarget.substring(0, 15);
+            const suffix = normalizedTarget.slice(-5);
 
-            // Find best match: file that contains our fingerprint and ends in .part (or is a temp file)
-            const candidate = files.find(f => {
+            // Find best match: file that contains our fingerprint and isn't already taken
+            const candidates = files.filter(f => {
+              const fullPath = join(download.savePath, f);
+              if (recoveredFiles.has(fullPath)) return false;
+              
               const normF = normalize(f);
-              return normF.includes(fingerprint) && (f.endsWith('.part') || f.includes('.tmp') || f.includes('.f137') || f.includes('.f140'));
+              // Check prefix AND suffix for much higher precision (episodes sharing same prefix)
+              const match = normF.startsWith(prefix) || (normF.includes(prefix) && normF.includes(suffix));
+              return match && (f.endsWith('.part') || f.includes('.tmp') || f.includes('.f137') || f.includes('.f140') || f.includes('.ytdl'));
             });
 
-            if (candidate) {
+            // If multiple candidates, pick the closest in length
+            if (candidates.length > 0) {
+              candidates.sort((a, b) => Math.abs(a.length - download.filename.length) - Math.abs(b.length - download.filename.length));
+              const candidate = candidates[0];
+              const fullPath = join(download.savePath, candidate);
+
               console.log(`[PERSISTENCE] Smart Recovery (Fuzzy): Mismatch found. Saved: "${download.filename}" -> Disk: "${candidate}"`);
-              existingFilePath = join(download.savePath, candidate);
+              existingFilePath = fullPath;
               existingFileSize = fs.statSync(existingFilePath).size;
 
               // CRITICAL FIX: Update filename to match the ACTUAL file on disk
-              const newFilename = candidate.replace('.part', '');
+              const newFilename = candidate.replace('.part', '').replace('.ytdl', '');
               if (newFilename.length > 5) { // Safety check
                 download.filename = newFilename;
               }
+              break; // Found in this directory, stop search
             }
           }
         } catch (e) { console.error('[PERSISTENCE] Fuzzy search failed', e) }
       }
 
-      // RELAXED PERSISTENCE: Restore tracker even if file is missing (might be named differently by yt-dlp or deleted)
-      // This ensures the backend knows about the download and can handle the "Resume" request properly (start over or find file)
+      // Register file as recovered to prevent other downloads from stealing it
+      if (existingFilePath) {
+        recoveredFiles.add(existingFilePath);
+      }
+
+      // RELAXED PERSISTENCE: Restore tracker even if file is missing
       if (true) { // Always restore if it was in the active list
+        
+        // [v1.9.5] If it was previously in queue, just add back to queue
+        if (download.isQueued) {
+           console.log(`[PERSISTENCE] Restoring to QUEUE: ${download.filename}`)
+           downloadQueue.push({
+             url: download.url,
+             savePath: download.savePath,
+             filename: download.filename,
+             headers: download.headers,
+             priority: 0,
+             retryCount: 0,
+             maxRetries: 3,
+             mainWindow: mainWindow!, // Use global mainWindow
+             audioOnly: !!download.audioOnly
+           })
+           return // Done for this item
+        }
+
         if (!existingFilePath) {
           console.log(`[PERSISTENCE] Partial file missing for: ${download.filename}. Restoring anyway to allow restart.`)
         } else {
@@ -6008,12 +6206,12 @@ function restoreActiveDownloads() {
           lastBytes: existingFileSize, // Actual bytes on disk (0 if missing)
           lastTime: Date.now(),
           savePath: download.savePath,
-          filename: download.filename.replace(/\.f\d+/g, '').replace(/\.f136/g, '').replace(/\.f248/g, ''), // [v1.5.5] Clean format IDs from filename
+          filename: download.filename, // [v1.9.3] DO NOT clean format IDs here, it breaks resume for YouTube
           headers: download.headers,
           strategy: download.strategy || (isYouTube ? 'yt-dlp' : 'direct'), // Fallback for legacy
           isYouTube: isYouTube,       // CRITICAL for resume logic
           totalBytes: totalBytes,
-          paused: true, // Start paused
+          paused: false, // [v1.9.3] Start active for auto-resume
           cancelled: false,
           lastProgress: lastProgress, // Use actual calculation
           statusMessage: existingFilePath ? (isFfmpegAvailable() ? 'Waiting for resume...' : 'Waiting for resume (Fixed mode - No FFmpeg)') : 'Interrupted (File missing)',
@@ -6023,20 +6221,36 @@ function restoreActiveDownloads() {
         const trackerId = getTrackerId(download.url, !!download.audioOnly)
         activeDownloads.set(trackerId, tracker)
 
-        // Notify frontend that download exists but is paused
+        // [v1.9.3] AUTO-RESUME: Directly add to queue instead of waiting for manual click
+        downloadQueue.push({
+          url: download.url,
+          savePath: download.savePath,
+          filename: download.filename,
+          headers: download.headers,
+          priority: 0,
+          retryCount: 0,
+          maxRetries: 3,
+          mainWindow: win,
+          audioOnly: !!download.audioOnly
+        })
+
+        // Notify frontend (optional, processDownloadQueue will send 'download-progress' soon)
         if (win && !win.isDestroyed()) {
-          win.webContents.send('download-started', {
+          safeSend(win, 'download-started', {
             url: download.url,
             audioOnly: !!download.audioOnly,
             name: download.filename,
             size: formatBytes(download.totalBytes),
             progress: tracker.lastProgress,
-            speed: '-',
-            status: 'paused', // Explicitly paused
+            speed: 'Queue...',
+            status: 'queued', 
           })
         }
       }
     })
+
+    // Notify the queue to start processing these added items
+    processDownloadQueue()
 
     // Clean up the persistence file after restore
     if (fs.existsSync(persistencePath)) {
@@ -6055,6 +6269,7 @@ function restoreActiveDownloads() {
 let isReallyQuitting = false
 app.on('before-quit', (e) => {
   if (isReallyQuitting) return
+  isAppQuitting = true // [v1.9.5] Signal all modules to STOP cleaning up trackers
 
   // If the app is activated, try to signal offline
   if (appSettings && appSettings.isActivated) {
@@ -6154,14 +6369,14 @@ async function cleanupOrphanedTempFiles() {
   try {
     const items = await fsPromises.readdir(downloadPath, { withFileTypes: true })
     const now = Date.now()
-    const maxAge = 24 * 60 * 60 * 1000 // 24 hours
+    const maxAge = 7 * 24 * 60 * 60 * 1000 // [v1.9.6] 7 days to favor resume
 
     for (const item of items) {
       if (item.isDirectory() && item.name === '.doulget_tmp') {
         const fullPath = join(downloadPath, item.name)
         const stats = await fsPromises.stat(fullPath)
         
-        // If the folder is older than 24h, it might be a remnant of a crashed session
+        // If the folder is older than 7 days, it might be a remnant of a crashed session
         if (now - stats.mtimeMs > maxAge) {
           console.log(`[Cleanup] Removing old temp folder: ${fullPath}`)
           await fsPromises.rm(fullPath, { recursive: true, force: true })

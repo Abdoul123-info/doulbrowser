@@ -7,21 +7,23 @@ export default defineConfig({
     main: {
         plugins: [
             externalizeDepsPlugin(),
-            obfuscator({
-                compact: true,
-                controlFlowFlattening: true,
-                controlFlowFlatteningThreshold: 1,
-                numbersToExpressions: true,
-                simplify: true,
-                stringArray: true,
-                stringArrayEncoding: ['base64'],
-                stringArrayThreshold: 1,
-                splitStrings: true,
-                splitStringsChunkLength: 5,
-                unicodeEscapeSequence: true,
-                identifierNamesGenerator: 'hexadecimal',
-                renameGlobals: false
-            })
+            ...(process.env.NODE_ENV === 'production' ? [
+                obfuscator({
+                    compact: true,
+                    controlFlowFlattening: true,
+                    controlFlowFlatteningThreshold: 1,
+                    numbersToExpressions: true,
+                    simplify: true,
+                    stringArray: true,
+                    stringArrayEncoding: ['base64'],
+                    stringArrayThreshold: 1,
+                    splitStrings: true,
+                    splitStringsChunkLength: 5,
+                    unicodeEscapeSequence: true,
+                    identifierNamesGenerator: 'hexadecimal',
+                    renameGlobals: false
+                })
+            ] : [])
         ],
         build: {
             rollupOptions: {
@@ -32,21 +34,23 @@ export default defineConfig({
     preload: {
         plugins: [
             externalizeDepsPlugin(),
-            obfuscator({
-                compact: true,
-                controlFlowFlattening: true,
-                controlFlowFlatteningThreshold: 1,
-                numbersToExpressions: true,
-                simplify: true,
-                stringArray: true,
-                stringArrayEncoding: ['base64'],
-                stringArrayThreshold: 1,
-                splitStrings: true,
-                splitStringsChunkLength: 5,
-                unicodeEscapeSequence: true,
-                identifierNamesGenerator: 'hexadecimal',
-                renameGlobals: false // Keep true only if you are sure it won't break Electron IPC
-            })
+            ...(process.env.NODE_ENV === 'production' ? [
+                obfuscator({
+                    compact: true,
+                    controlFlowFlattening: true,
+                    controlFlowFlatteningThreshold: 1,
+                    numbersToExpressions: true,
+                    simplify: true,
+                    stringArray: true,
+                    stringArrayEncoding: ['base64'],
+                    stringArrayThreshold: 1,
+                    splitStrings: true,
+                    splitStringsChunkLength: 5,
+                    unicodeEscapeSequence: true,
+                    identifierNamesGenerator: 'hexadecimal',
+                    renameGlobals: false // Keep true only if you are sure it won't break Electron IPC
+                })
+            ] : [])
         ],
         build: {
             rollupOptions: {

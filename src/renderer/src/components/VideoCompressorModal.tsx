@@ -44,8 +44,13 @@ export function VideoCompressorModal({ isOpen, onClose, isMinimized, onMinimize,
     // Report state to parent for BackgroundTasks pill
     useEffect(() => {
         if (onReportState) {
+            let reportedStatus = 'active';
+            if (status === 'idle') reportedStatus = 'idle';
+            else if (status === 'success') reportedStatus = 'success';
+            else if (status === 'error') reportedStatus = 'error';
+
             onReportState({
-                status: status === 'compressing' ? 'active' : (status === 'success' || status === 'error' ? status : 'active'),
+                status: reportedStatus,
                 progress
             });
         }

@@ -128,7 +128,7 @@ export default function App() {
               setIsConverterOpen(false);
               setMinimizedTasks(prev => { const n = { ...prev }; delete n.converter; return n; });
             }}
-            isMinimized={!!minimizedTasks.converter}
+            isMinimized={!!minimizedTasks.converter && !isConverterOpen}
             onMinimize={() => setIsConverterOpen(false)}
             onReportState={(s) => handleTaskStateUpdate('converter', s)}
           />
@@ -138,7 +138,7 @@ export default function App() {
               setIsCompressorOpen(false);
               setMinimizedTasks(prev => { const n = { ...prev }; delete n.compressor; return n; });
             }}
-            isMinimized={!!minimizedTasks.compressor}
+            isMinimized={!!minimizedTasks.compressor && !isCompressorOpen}
             onMinimize={() => setIsCompressorOpen(false)}
             onReportState={(s) => handleTaskStateUpdate('compressor', s)}
           />
@@ -157,7 +157,12 @@ export default function App() {
 
           <BackgroundTasks
             tasks={Object.entries(minimizedTasks)
-              .filter(([_, s]) => s.progress < 100 || s.status === 'active') // Hide finished success tasks? Or show them? Let's show active.
+              .filter(([id, s]) => {
+                const isModalOpen = (id === 'converter' && isConverterOpen) ||
+                  (id === 'compressor' && isCompressorOpen) ||
+                  (id === 'batch' && isBatchOpen);
+                return s.status !== 'idle' && !isModalOpen;
+              })
               .map(([id, s]) => ({
                 id: id as any,
                 title: id,
@@ -168,6 +173,7 @@ export default function App() {
             onRestore={(type) => {
               if (type === 'converter') setIsConverterOpen(true);
               if (type === 'compressor') setIsCompressorOpen(true);
+              if (type === 'batch') setIsBatchOpen(true);
             }}
             onClose={(type) => {
               setMinimizedTasks(prev => { const n = { ...prev }; delete n[type]; return n; });

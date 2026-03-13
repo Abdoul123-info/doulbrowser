@@ -38,12 +38,13 @@ export function BatchDownloadModal({ isOpen, onClose, externalData }: BatchDownl
             setEntries([]);
             setError(null);
         } else if (externalData) {
-            // [v1.5.1] Auto-populate from extension
             setPlaylistTitle(externalData.playlistTitle);
             setEntries(externalData.items);
             setStatus('listing');
         }
     }, [isOpen, externalData]);
+
+    // Simplified version - no state reporting for batch to avoid background issues
 
     const handleFetchPlaylist = async () => {
         if (!urlInput.trim()) return;
@@ -275,7 +276,7 @@ export function BatchDownloadModal({ isOpen, onClose, externalData }: BatchDownl
                 {/* Footer */}
                 <div className="p-4 bg-white/[0.01] border-t border-white/5 text-center shrink-0">
                     <p className="text-[10px] text-muted-foreground/40 uppercase tracking-widest font-bold">
-                        DoulGet Smart Batch Engine v1.4.0
+                        DoulGet Smart Batch Engine v1.8.3
                     </p>
                 </div>
             </div>
