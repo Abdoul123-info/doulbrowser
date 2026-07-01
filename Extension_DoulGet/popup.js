@@ -6,6 +6,8 @@ const statusDiv = document.getElementById('status');
 const openAppButton = document.getElementById('openApp');
 const testDownloadButton = document.getElementById('testDownload');
 const detectCurrentPageButton = document.getElementById('detectCurrentPage');
+const updateAlert = document.getElementById('updateAlert');
+const updateVersionSpan = document.getElementById('updateVersion');
 
 // Vérifier la connexion au démarrage
 checkConnection();
@@ -43,7 +45,28 @@ function checkConnection() {
       chrome.storage.local.set({ doulbrowserConnected: false });
       console.log('DoulGet: Erreur de connexion', error);
     });
+
+  // Check update status
+  chrome.storage.local.get(['updateAvailable', 'latestVersion', 'updateUrl'], (res) => {
+    if (res.updateAvailable) {
+      updateAlert.style.display = 'block';
+      updateVersionSpan.textContent = `Extension v${res.latestVersion}`;
+      
+      // [v2.2.1] Default to zip download instead of GitHub if available
+      updateAlert.dataset.url = res.updateUrl || 'https://github.com/Abdoul123-info/doulbrowser/releases/latest';
+    } else {
+      updateAlert.style.display = 'none';
+    }
+  });
 }
+
+updateAlert.addEventListener('click', (e) => {
+    e.preventDefault();
+    const url = updateAlert.dataset.url;
+    if (url) {
+        window.open(url, '_blank');
+    }
+});
 
 openAppButton.addEventListener('click', () => {
   // Essayer d'ouvrir l'application (nécessite un protocole personnalisé)

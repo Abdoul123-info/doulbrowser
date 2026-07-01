@@ -44,6 +44,9 @@ export interface DownloadAPI {
     licenseKey: string
   }>) => Promise<any>
   getDownloadLogs: (url: string) => Promise<string[]>
+  getAppLogPath: () => Promise<string>
+  readAppLog: (maxLines?: number) => Promise<string[]>
+  openAppLogFolder: () => Promise<boolean>
   deleteFile: (path: string, filename?: string) => Promise<boolean>
   getLicenseStatus: () => Promise<{
     isActivated: boolean,
@@ -58,11 +61,11 @@ export interface DownloadAPI {
   adminResetLicense: (password: string) => Promise<{ success: boolean, error?: string }>
   adminGetAllLicenses: (password: string) => Promise<{ success: boolean, licenses: any[], error?: string }>
   adminUpdateLicenseStatus: (password: string, targetMid: string, isBlocked: boolean) => Promise<{ success: boolean, error?: string }>
-  adminUploadUpdateFile: (password: string, localPath: string, type: 'setup' | 'extension') => Promise<{ success: boolean, url?: string, error?: string }>
+  adminUploadUpdateFile: (password: string, localPath: string, type: 'setup' | 'extension') => Promise<{ success: boolean, url?: string, hash?: string, error?: string }>
   adminSelectUpdateFile: (type: 'setup' | 'extension') => Promise<string | null>
   getAppVersion: () => Promise<string>
-  checkAppUpdate: () => Promise<{ updateAvailable: boolean, latestVersion?: string, currentVersion?: string, downloadUrl?: string }>
-  adminSetLatestVersion: (password: string, newVersion: string, downloadUrl?: string) => Promise<{ success: boolean, error?: string }>
+  checkAppUpdate: () => Promise<{ updateAvailable: boolean, latestVersion?: string, currentVersion?: string, downloadUrl?: string, updateHash?: string }>
+  adminSetLatestVersion: (password: string, newVersion: string, downloadUrl?: string, extensionVersion?: string, extensionUrl?: string, updateHash?: string, extensionHash?: string) => Promise<{ success: boolean, error?: string }>
   verifyAdminPassword: (password: string) => Promise<boolean>
   pingLicense: () => Promise<{ success: boolean }>
   adminDeleteLicenseCloud: (password: string, targetMid: string) => Promise<{ success: boolean, error?: string }>
@@ -81,12 +84,15 @@ export interface DownloadAPI {
   adminGetFeedback: (password: string) => Promise<{ success: boolean, feedback?: any[], error?: string }>
   getFeedbackStatus: () => Promise<{ submitted: boolean }>
   // [v1.6.0] Auto-Update APIs 🚀
-  startAppUpdate: (downloadUrl: string) => Promise<{ success: boolean, error?: string }>
+  startAppUpdate: (downloadUrl: string, expectedHash: string) => Promise<{ success: boolean, error?: string }>
   installAppUpdate: () => Promise<{ success: boolean, error?: string }>
   onUpdateProgress: (callback: (event: any, progress: number) => void) => void
   onUpdateReady: (callback: (event: any) => void) => void
   onUpdateError: (callback: (event: any, error: string) => void) => void
   onExternalBatch: (callback: (event: any, data: any) => void) => void
+  installExtensionUpdate: (url: string, expectedHash: string) => Promise<{ success: boolean, error?: string }>
+  getExtensionVersion: () => Promise<string>
+  registerExtensionInBrowsers: () => Promise<{ success: boolean, extensionPath?: string, infoFile?: string, browserOpened?: boolean, error?: string }>
   removeDownloadListeners: () => void
 }
 

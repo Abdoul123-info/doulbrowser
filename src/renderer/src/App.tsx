@@ -13,6 +13,7 @@ import { VideoCompressorModal } from './components/VideoCompressorModal';
 import { BatchDownloadModal } from './components/BatchDownloadModal';
 import { BackgroundTasks } from './components/BackgroundTasks';
 import { FeedbackModal } from './components/FeedbackModal';
+import { ExtensionUpdateNotification } from './components/ExtensionUpdateNotification';
 
 export default function App() {
   const [activeFilter, setActiveFilter] = useState('all');
@@ -179,6 +180,7 @@ export default function App() {
               setMinimizedTasks(prev => { const n = { ...prev }; delete n[type]; return n; });
             }}
           />
+          <ExtensionUpdateNotification />
         </div>
       )}
 

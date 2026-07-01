@@ -1,4 +1,4 @@
-import { Play, Pause, X, File, FolderOpen, Terminal, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
+import { Play, Pause, X, File, FolderOpen, Terminal, ChevronDown, ChevronRight, RotateCcw, AlertTriangle, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import { useState, useEffect, useCallback } from 'react';
 import { AddDownloadModal } from './AddDownloadModal';
@@ -50,17 +50,23 @@ function loadDownloadsFromStorage(): DownloadItem[] {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
             const parsed = JSON.parse(stored);
-            // [v1.2.9] Keep cancelled downloads so they show in "Corbeille" tab
             const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-            return parsed
-                .filter((item: DownloadItem) => item.createdAt > thirtyDaysAgo)
-                .map((item: DownloadItem) => {
-                    // Mark active downloads as interrupted/paused on startup until backend resumes them
-                    if (['downloading', 'queued'].includes(item.status)) {
-                        return { ...item, status: 'paused', statusMessage: 'Waiting for resume...' };
-                    }
-                    return item;
-                });
+
+            // [FIX v2.3.7] MIGRATION: Exclure les 'finished' de l'ancien localStorage
+            // Ils ne doivent plus être sauvegardés ni restaurés (voir saveDownloadsToStorage).
+            // Ce filtre nettoie automatiquement l'historique existant dès le premier démarrage.
+            const filtered = parsed.filter((item: DownloadItem) => {
+                if (item.status === 'finished') return false; // ← MIGRATION: ignore les anciens 'finished'
+                return item.createdAt > thirtyDaysAgo;
+            });
+
+            return filtered.map((item: DownloadItem) => {
+                // Mark active downloads as interrupted/paused on startup until backend resumes them
+                if (['downloading', 'queued'].includes(item.status)) {
+                    return { ...item, status: 'paused', statusMessage: 'Waiting for resume...' };
+                }
+                return item;
+            });
         }
     } catch (error) {
         console.error('Error loading downloads from storage:', error);
@@ -70,14 +76,54 @@ function loadDownloadsFromStorage(): DownloadItem[] {
 
 function saveDownloadsToStorage(downloads: DownloadItem[]): void {
     try {
-        // Save finished, paused, error, and interrupted downloads (but not active ones)
-        // Save all downloads regardless of status so they reappear on restart
-        const toSave = downloads;
+        // [FIX v2.3.7] Ne PAS sauvegarder les 'finished' : ils reviendraient au démarrage
+        // car le backend les restaure comme 'paused' et les relance automatiquement.
+        // On garde uniquement paused, error, interrupted, queued et cancelled.
+        const toSave = downloads.filter(item => item.status !== 'finished');
         localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
     } catch (error) {
         console.error('Error saving downloads to storage:', error);
     }
 }
+
+// ─── Confirm Dialog (remplace window.confirm() bloqué en Electron) ───
+interface ConfirmDialogState {
+    open: boolean;
+    message: string;
+    onConfirm: () => void;
+}
+
+function ConfirmDialog({ state, onClose }: { state: ConfirmDialogState, onClose: () => void }) {
+    if (!state.open) return null;
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+            <div className="relative bg-card border border-border rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4 flex flex-col gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-red-500/15 flex items-center justify-center shrink-0">
+                        <AlertTriangle className="w-5 h-5 text-red-500" />
+                    </div>
+                    <p className="text-sm text-foreground leading-relaxed">{state.message}</p>
+                </div>
+                <div className="flex justify-end gap-2">
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-2 rounded-lg text-sm bg-secondary hover:bg-secondary/80 text-foreground transition-colors"
+                    >
+                        Annuler
+                    </button>
+                    <button
+                        onClick={() => { state.onConfirm(); onClose(); }}
+                        className="px-4 py-2 rounded-lg text-sm bg-red-500 hover:bg-red-600 text-white font-medium transition-colors"
+                    >
+                        Confirmer
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+// ─────────────────────────────────────────────────────────────────────
 
 export function DownloadList({ filter }: DownloadListProps) {
     const { t } = useTranslation();
@@ -85,6 +131,14 @@ export function DownloadList({ filter }: DownloadListProps) {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [logModalItem, setLogModalItem] = useState<{ url: string, name: string } | null>(null);
+    const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({ open: false, message: '', onConfirm: () => {} });
+
+    const showConfirm = useCallback((message: string, onConfirm: () => void) => {
+        setConfirmDialog({ open: true, message, onConfirm });
+    }, []);
+    const closeConfirm = useCallback(() => {
+        setConfirmDialog(prev => ({ ...prev, open: false }));
+    }, []);
 
     // Save to localStorage whenever downloads change
     useEffect(() => {
@@ -206,9 +260,11 @@ export function DownloadList({ filter }: DownloadListProps) {
 
         const handleStarted = (_event: any, data: any) => {
             setDownloads(prev => {
-                // Check if already exists in active state - [v1.7.0] Format-aware check
-                if (prev.find(item => item.url === data.url && !!item.audioOnly === !!data.audioOnly && ['queued', 'downloading', 'paused'].includes(item.status))) {
-                    console.log('[DEBUG] Download already exists in UI:', data.url, 'AudioOnly:', data.audioOnly);
+                // [FIX v2.3.7] Vérifier aussi les 'finished' pour éviter doublons au redémarrage
+                // Le backend restaure les downloads et envoie 'download-started' même pour des
+                // URLs déjà finies côté frontend (localStorage ne les garde plus, mais en mémoire).
+                if (prev.find(item => item.url === data.url && !!item.audioOnly === !!data.audioOnly && ['queued', 'downloading', 'paused', 'finished'].includes(item.status))) {
+                    console.log('[DEBUG] Download already exists in UI (incl. finished):', data.url, 'AudioOnly:', data.audioOnly);
                     return prev;
                 }
 
@@ -334,10 +390,19 @@ export function DownloadList({ filter }: DownloadListProps) {
     }, [downloads]);
 
     const handleCancel = useCallback((url: string, audioOnly: boolean = false) => {
-        if (confirm(t.downloadList.cancelConfirm)) {
-            window.api.cancelDownload(url, audioOnly);
-        }
-    }, [t]);
+        showConfirm(
+            t.downloadList.cancelConfirm || 'Voulez-vous annuler ce téléchargement ?',
+            () => {
+                window.api.cancelDownload(url, audioOnly);
+                // Mise à jour immédiate de l'UI sans attendre l'event backend
+                setDownloads(prev => prev.map(item =>
+                    (item.url === url && !!item.audioOnly === !!audioOnly)
+                        ? { ...item, status: 'cancelled' as const, speed: '-', timeLeft: '' }
+                        : item
+                ));
+            }
+        );
+    }, [t, showConfirm]);
 
     const handleOpenFolder = useCallback((url: string, audioOnly: boolean = false) => {
         const item = downloads.find(d => d.url === url && !!d.audioOnly === !!audioOnly);
@@ -345,16 +410,34 @@ export function DownloadList({ filter }: DownloadListProps) {
     }, [downloads]);
 
     const handleDelete = useCallback((id: string) => {
-        if (confirm(t.downloadList.deleteConfirm)) {
-            const itemToDelete = downloads.find(d => d.id === id);
-            if (!itemToDelete) return;
+        const itemToDelete = downloads.find(d => d.id === id);
+        if (!itemToDelete) return;
+
+        const doDelete = () => {
+            // [FIX] Si le téléchargement est actif, l'arrêter côté backend AVANT de supprimer
+            if (['downloading', 'queued', 'paused'].includes(itemToDelete.status) && itemToDelete.url) {
+                window.api.cancelDownload(itemToDelete.url, !!itemToDelete.audioOnly);
+            }
+
+            // [FIX v2.3.7] Les items 'finished' sont supprimés DIRECTEMENT et DEFINITIVEMENT
+            // (pas de passage par la corbeille → ils ne reviennent plus au redémarrage)
+            if (itemToDelete.status === 'finished') {
+                setDownloads(prev => {
+                    const updated = prev.filter(item => item.id !== id);
+                    try {
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+                    } catch (error) {
+                        console.error('Error saving downloads to storage:', error);
+                    }
+                    return updated;
+                });
+                return;
+            }
 
             // [v1.2.9] Soft Delete Flow: If not already cancelled, move to Trash
             if (itemToDelete.status !== 'cancelled') {
-                // [v1.3.0] CHANGE: Do NOT move file to system Recycle Bin yet.
-                // Just change status so it appears in the "Corbeille" tab.
                 setDownloads(prev => prev.map(item =>
-                    item.id === id ? { ...item, status: 'cancelled' as const } : item
+                    item.id === id ? { ...item, status: 'cancelled' as const, speed: '-', timeLeft: '' } : item
                 ));
                 return;
             }
@@ -366,7 +449,6 @@ export function DownloadList({ filter }: DownloadListProps) {
 
             setDownloads(prev => {
                 const updated = prev.filter(item => item.id !== id);
-                // Sauvegarder immédiatement pour éviter que l'élément revienne
                 try {
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
                 } catch (error) {
@@ -374,8 +456,13 @@ export function DownloadList({ filter }: DownloadListProps) {
                 }
                 return updated;
             });
-        }
-    }, [t, downloads]);
+        };
+
+        showConfirm(
+            t.downloadList.deleteConfirm || 'Voulez-vous supprimer cet élément ?',
+            doDelete
+        );
+    }, [t, downloads, showConfirm]);
 
     const handleRestore = useCallback((id: string) => {
         setDownloads(prev => prev.map(item => {
@@ -423,40 +510,41 @@ export function DownloadList({ filter }: DownloadListProps) {
     }, [downloads, selectedIds]);
 
     const handleDeleteSelected = useCallback(() => {
-        if (!confirm(t.downloadList.deleteConfirm)) return;
+        showConfirm(
+            t.downloadList.deleteConfirm || 'Voulez-vous supprimer les éléments sélectionnés ?',
+            () => {
+                const idsToDelete = new Set(selectedIds);
 
-        const idsToDelete = new Set(selectedIds);
-
-        setDownloads(prev => {
-            const updated = prev.map(item => {
-                if (idsToDelete.has(item.id)) {
-                    // Soft delete: move to trash if not already there
-                    if (item.status !== 'cancelled') {
-                        // Cancel if active
-                        if (['downloading', 'queued', 'paused'].includes(item.status) && item.url) {
-                            window.api.cancelDownload(item.url, !!item.audioOnly);
+                setDownloads(prev => {
+                    const updated = prev.map(item => {
+                        if (idsToDelete.has(item.id)) {
+                            // [FIX] Cancel active downloads before deleting
+                            if (item.status !== 'cancelled') {
+                                if (['downloading', 'queued', 'paused'].includes(item.status) && item.url) {
+                                    window.api.cancelDownload(item.url, !!item.audioOnly);
+                                }
+                                return { ...item, status: 'cancelled' as const, speed: '-', timeLeft: '' };
+                            }
+                            // Permanent removal: PERFORM PHYSICAL DELETE if in Trash
+                            if (item.savePath) {
+                                window.api.deleteFile(item.savePath, item.name);
+                            }
+                            return null;
                         }
-                        // [v1.3.0] CHANGE: Do NOT call deleteFile yet during soft delete
-                        return { ...item, status: 'cancelled' as const };
-                    }
-                    // [v1.3.0] Permanent removal: PERFORM PHYSICAL DELETE if in Trash
-                    if (item.savePath) {
-                        window.api.deleteFile(item.savePath, item.name);
-                    }
-                    return null;
-                }
-                return item;
-            }).filter((item): item is DownloadItem => item !== null);
+                        return item;
+                    }).filter((item): item is DownloadItem => item !== null);
 
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-            } catch (error) {
-                console.error('Error saving downloads to storage:', error);
+                    try {
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+                    } catch (error) {
+                        console.error('Error saving downloads to storage:', error);
+                    }
+                    return updated;
+                });
+                setSelectedIds(new Set());
             }
-            return updated;
-        });
-        setSelectedIds(new Set());
-    }, [downloads, selectedIds, t]);
+        );
+    }, [downloads, selectedIds, t, showConfirm]);
 
     const handleRestoreSelected = useCallback(() => {
         setDownloads(prev => prev.map(item => {
@@ -652,13 +740,22 @@ export function DownloadList({ filter }: DownloadListProps) {
                                                 </button>
                                             )}
                                             {(item.status === 'downloading' || item.status === 'queued' || item.status === 'paused' || item.status === 'interrupted') && (
-                                                <button
-                                                    onClick={() => item.url && handleCancel(item.url, !!item.audioOnly)}
-                                                    className="p-1.5 hover:bg-red-500/10 rounded-md text-muted-foreground hover:text-red-500 transition-colors"
-                                                    title="Cancel"
-                                                >
-                                                    <X className="w-4 h-4" />
-                                                </button>
+                                                <>
+                                                    <button
+                                                        onClick={() => item.url && handleCancel(item.url, !!item.audioOnly)}
+                                                        className="p-1.5 hover:bg-red-500/10 rounded-md text-muted-foreground hover:text-red-500 transition-colors"
+                                                        title="Annuler"
+                                                    >
+                                                        <X className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(item.id)}
+                                                        className="p-1.5 hover:bg-red-500/20 rounded-md text-red-400 hover:text-red-500 transition-colors"
+                                                        title="Annuler et supprimer"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </>
                                             )}
                                             {item.status === 'finished' && (
                                                 <button
@@ -722,6 +819,8 @@ export function DownloadList({ filter }: DownloadListProps) {
                 url={logModalItem?.url || ''}
                 filename={logModalItem?.name || ''}
             />
+
+            <ConfirmDialog state={confirmDialog} onClose={closeConfirm} />
         </div >
     );
 }

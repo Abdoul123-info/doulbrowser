@@ -1,511 +1,1122 @@
-// DoulBrowser Content Script - IDM Method
+// DoulGet Content Script - IDM Method
 // Network Sniffer + Video Element Mapping
+// Restored from v1.9.4 with 2026 Lok-lok Fix (v1.9.6)
 
 (function () {
-    console.log('🚀 DoulBrowser UI Manager - IDM Method ACTIVE');
+    console.log('🚀 DoulGet UI Manager - IDM Method ACTIVE (v1.9.9)');
 
     // ============================================
     // GM_ API BRIDGE FOR MAIN WORLD COMPATIBILITY
-    // Fixes ReferenceError: GM_cookie in YouTube scripts
     // ============================================
 
-    // 1. Inject the bridge script from the extension
-    try {
-        const script = document.createElement('script');
-        script.src = chrome.runtime.getURL('bridge.js');
-        (document.head || document.documentElement).appendChild(script);
-        script.onload = () => script.remove();
-        console.log('🚀 DoulBrowser GM_ Bridge Loader ACTIVE');
-    } catch (e) {
-        console.error('❌ Failed to inject GM_ bridge:', e);
+    function isContextValid() {
+        try {
+            return typeof chrome !== 'undefined' && chrome.runtime && !!chrome.runtime.id;
+        } catch(e) { return false; }
     }
 
-    // 2. Listen for requests from the Main World and forward to Background
+    function dgetMessage(key, fallback = '') {
+        try {
+            if (typeof chrome !== 'undefined' && chrome.i18n) {
+                return chrome.i18n.getMessage(key) || fallback;
+            }
+        } catch (e) {}
+        return fallback;
+    }
+
     window.addEventListener('message', (event) => {
-        // Only accept messages from the same window
-        if (event.source !== window || !event.data || event.data.type !== 'DOULBROWSER_GM_BRIDGE' || event.data.responseId) {
-            return;
-        }
-
+        if (event.source !== window || !event.data || event.data.type !== 'DOULGET_GM_BRIDGE' || event.data.responseId) return;
+        if (!isContextValid()) return;
         const { action, details, id } = event.data;
-
-        // Forward to background script
         chrome.runtime.sendMessage({ action, details }, (response) => {
-            // Send back to the Main World
+            if (chrome.runtime.lastError) return;
             window.postMessage({
-                type: 'DOULBROWSER_GM_BRIDGE',
-                responseId: id,
-                cookies: response?.cookies,
-                error: response?.error,
-                details: response?.details,
-                cookie: response?.cookie // for GM_cookie_set
+                type: 'BRIDGE_RESPONSE',
+                id: id,
+                ...response
             }, '*');
         });
     });
 
-    // Map video elements to their CDN URLs
-    const videoUrlMap = new WeakMap(); // video element -> CDN URL
-
-    // Listen for captured video URLs from background
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-        if (request.action === 'videoCaptured') {
-            // Find video element currently playing this URL - more aggressive scan
-            const allVideos = findAllVideos();
-            console.log(`🔍 Found ${allVideos.length} video elements`);
-
-            allVideos.forEach(video => {
-                // Map ANY video to captured CDN (HLS videos use blob URLs)
-                videoUrlMap.set(video, {
-                    cdnUrl: request.url,
-                    headers: request.headers,
-                    capturedAt: Date.now()
-                });
-                console.log('📹 Mapped video to CDN:', request.url.substring(0, 60));
-            });
-        }
-
-        if (request.action === 'detectVideo') {
-            const url = location.href;
-            chrome.runtime.sendMessage({
-                action: 'sendDownload',
-                url: url,
-                filename: document.title || 'video',
-                type: 'video/mp4'
-            }, (response) => {
-                sendResponse({ success: !!(response && response.success) });
-            });
-            return true;
-        }
+    const lokLokStreamCache = {};
+    window.addEventListener('message', (event) => {
+        if (event.source !== window || event.data?.type !== 'DOULGET_STREAM_INTERCEPTED') return;
+        const { ep, se, url } = event.data;
+        // Store both url and season so filenames can include S01E02 format
+        lokLokStreamCache[ep] = { url, se };
+        console.log(`[DoulGet] 📡 Stream cached: S${se}E${ep} → ${url.substring(0, 50)}...`);
     });
 
-    // AGGRESSIVE VIDEO FINDER - scans everywhere
-    function findAllVideos() {
-        const videos = new Set();
+    const videoUrlMap = new WeakMap(); 
 
-        // 1. Main document
-        document.querySelectorAll('video').forEach(v => videos.add(v));
-
-        // 2. All Shadow DOM (deep scan)
-        document.querySelectorAll('*').forEach(el => {
-            if (el.shadowRoot) {
-                el.shadowRoot.querySelectorAll('video').forEach(v => videos.add(v));
+    if (isContextValid() && chrome.runtime.onMessage) {
+        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+            if (request.action === 'videoCaptured') {
+                const allVideos = findAllVideos();
+                console.log(`🔍 Found ${allVideos.length} video elements`);
+                allVideos.forEach(video => {
+                    videoUrlMap.set(video, { cdnUrl: request.url, headers: request.headers, capturedAt: Date.now() });
+                    console.log('📹 Mapped video to CDN:', request.url.substring(0, 60));
+                });
+                
+                // Show floating bar if requested directly (e.g. from FileCR sniffer in iframe)
+                if (request.showImmediate || request.action === 'requestShowBar') {
+                    if (window === window.top) {
+                        showFloatingCapture(request.url, request.filename || 'download', request.headers || {});
+                    }
+                }
+                if (allVideos.length === 0 || request.filename) {
+                    console.log('📦 Triggering floating capture bar for:', request.filename || request.url);
+                    showFloatingCapture(request.url, request.filename, request.headers);
+                }
+            }
+            if (request.action === 'detectVideo') {
+                const url = location.href;
+                chrome.runtime.sendMessage({ action: 'sendDownload', url: url, filename: document.title || 'video', type: 'video/mp4' }, (res) => {
+                    sendResponse({ success: !!(res && res.success) });
+                });
+                return true;
             }
         });
+    }
 
-        // 3. All iframes (same origin only)
+    function findAllVideos() {
+        const videos = new Set();
+        document.querySelectorAll('video').forEach(v => videos.add(v));
+        document.querySelectorAll('*').forEach(el => { if (el.shadowRoot) el.shadowRoot.querySelectorAll('video').forEach(v => videos.add(v)); });
         try {
             document.querySelectorAll('iframe').forEach(iframe => {
                 try {
                     const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                    if (iframeDoc) {
-                        iframeDoc.querySelectorAll('video').forEach(v => videos.add(v));
-                    }
-                } catch (e) {
-                    // Cross-origin iframe, ignore
-                }
+                    if (iframeDoc) iframeDoc.querySelectorAll('video').forEach(v => videos.add(v));
+                } catch (e) {}
             });
-        } catch (e) { }
+        } catch (e) {}
 
-        return Array.from(videos);
+        return Array.from(videos).filter(v => {
+            try {
+                const rect = v.getBoundingClientRect();
+                const style = window.getComputedStyle(v);
+                const isVisible = rect.width > 10 && rect.height > 10 && style.display !== 'none' && style.visibility !== 'hidden' && v.isConnected;
+                if (!isVisible) return false;
+                if (location.href.includes('youtube.com') && rect.top < 1 && rect.width < 50) return false;
+                return true;
+            } catch (e) { return false; }
+        });
     }
 
-    // FIND ALL DOWNLOAD LINKS - Documents like PDFs, Word, ZIP, etc.
+    function findAllEpisodes() {
+        if (getContentType() !== 'series') return [];
+        const episodes = [];
+        const currentUrl = location.href;
+        
+        const selectors = [
+            '.episode-item', '.play-list-item', '.ant-tabs-tab', 
+            '.ep-item', '.episode-link', '.episode', 
+            '[class*="episode"]', '[class*="play-list"]',
+            '.playlist-content a', '.series-episodes a',
+            '.ant-tabs-tab-btn', '.episode-btn',
+            '.pc-resource-box *', '.pc-btn', '.pc-card',
+            '.pc-episode', '.vui-episode', '.vui-tab',
+            // [v1.9.6] New Lok-lok 2026 selectors
+            '.pc-ep', '.pc-ep-active', '.pc-ep-contain *',
+            'div[class*="resource-box"] *', 'span[class*="resource"]',
+            '.resource-box-content *', '.resource-title',
+            '[class*="item"]', '[class*="box"] span'
+        ];
+        
+        const blacklist = new Set([143, 144, 240, 360, 480, 720, 1080, 2160, 1024, 2048, 4096]);
+        const excludedAncestors = ['quality', 'resolution', 'player-control', 'settings', 'speed', 'bitrate', 'playback', 'volume', 'progress', 'slider', 'subtitle', 'caption', 'menu-panel', 'tooltip', 'overlay', 'ad-', 'banner', 'movie-box', 'moviebox', 'advert', 'promo', 'detail-info', 'meta-info', 'release-date', 'date-info', 'footer', 'comment', 'review', 'user-info', 'resource-box', 'subtitles-info', 'pc-resource-box'];
+        
+        console.log('[DoulGet] Scanning for episodes (v1.9.6)...');
+        
+        const allCandidates = new Set();
+        selectors.forEach(sel => {
+            try { document.querySelectorAll(sel).forEach(el => allCandidates.add(el)); } catch (e) {}
+        });
+
+        allCandidates.forEach(el => {
+            let ancestorCheck = el;
+            let ancestorClasses = '';
+            for (let i = 0; i < 5 && ancestorCheck; i++) {
+                ancestorClasses += ' ' + (ancestorCheck.className || '');
+                ancestorCheck = ancestorCheck.parentElement;
+            }
+            const ancestorLower = ancestorClasses.toLowerCase();
+            if (excludedAncestors.some(kw => ancestorLower.includes(kw))) return;
+            
+            const parentText = (el.parentElement?.textContent || '').trim();
+            const grandParentText = (el.parentElement?.parentElement?.textContent || '').trim();
+            const dateRegex = /\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}/;
+            if (dateRegex.test(parentText) || dateRegex.test(grandParentText)) return;
+            if (el.parentElement && dateRegex.test(el.parentElement.innerText)) return;
+            
+            const isPlayingElement = el.classList.contains('active') || el.classList.contains('playing') || el.classList.contains('current') || el.classList.contains('pc-ep-active') || el.querySelector('img') || el.querySelector('[class*="playing"]');
+            let text = el.textContent.trim().replace(/\s+/g, ' ');
+            
+            if (isPlayingElement && (!text || text.length < 1)) {
+                episodes.push({ title: 'Episode (Playing)', url: currentUrl });
+                return;
+            }
+            if (!text) return;
+            if (/^\d{3,4}p$/i.test(text)) return;
+            if (text.length > 30) return;
+
+            const epMatch = text.match(/(?:Episode|Ep\.?\s?|S\d+E|Épisode|Ép\.?\s?|Part[.\s]?|#)?\s?(\d{1,3})(?!\s?p|fps|kbps)/i);
+            if (epMatch || (text.length <= 4 && /^\d+$/.test(text))) {
+                const epNumStr = epMatch ? epMatch[1] : text.match(/\d+/)?.[0];
+                if (!epNumStr) return;
+                const epNum = parseInt(epNumStr);
+                if (blacklist.has(epNum)) return;
+                if (epNum > 500 && !text.toLowerCase().includes('episode') && !text.toLowerCase().includes('ep')) return;
+                if (epNum === 0) return; 
+                if (text.toLowerCase().includes('size') || text.toLowerCase().includes('mo') || text.toLowerCase().includes('gb')) return;
+                
+                const lowerParent = parentText.toLowerCase();
+                const lowerGrand = grandParentText.toLowerCase();
+                if (lowerParent.includes('subtitle') || lowerGrand.includes('subtitle')) return;
+                if (lowerParent.includes('user') || lowerGrand.includes('user')) return;
+                if (lowerParent.includes('resource') || lowerGrand.includes('resource')) return;
+                if (text.length > 4) return;
+
+                const href = el.href || el.querySelector('a')?.href || (el.tagName === 'A' ? el.href : null);
+                let se = '01';
+                if (location.href.includes('lok-lok.cc') || location.href.includes('movie-box.co') || location.href.includes('moviebox')) {
+                    const sMatch = location.href.match(/[?&]se=(\d+)/) || location.href.match(/[?&]detailSe=(\d+)/);
+                    if (sMatch) se = sMatch[1];
+                }
+
+                episodes.push({
+                    title: `Episode ${epNum}`, 
+                    url: (href && href.startsWith('http')) ? href : currentUrl,
+                    epNum: epNum,
+                    se: parseInt(se)
+                });
+            }
+        });
+
+        const seenTitles = new Set();
+        const seenNums = new Set();
+        let filtered = episodes.filter(ep => {
+            if (ep.title.includes('Playing')) return true;
+            if (seenTitles.has(ep.title) || (ep.epNum && seenNums.has(ep.epNum))) return false;
+            seenTitles.add(ep.title);
+            if (ep.epNum) seenNums.add(ep.epNum);
+            return true;
+        });
+
+        const playingIdx = filtered.findIndex(e => e.title.includes('Playing'));
+        if (playingIdx !== -1) {
+            const urlMatch = currentUrl.match(/[?&]ep=(\d+)/) || currentUrl.match(/\/episode-(\d+)/i) || currentUrl.match(/_E(\d+)/i);
+            if (urlMatch) {
+                const num = parseInt(urlMatch[1]);
+                filtered[playingIdx].title = `Episode ${num}`;
+                filtered[playingIdx].epNum = num;
+            } else if (filtered.length > 1) {
+                filtered.splice(playingIdx, 1);
+            } else {
+                filtered[playingIdx].title = 'Episode 1';
+                filtered[playingIdx].epNum = 1;
+            }
+        }
+        filtered.sort((a, b) => (a.epNum || 0) - (b.epNum || 0));
+        console.log(`[DoulGet] Found ${filtered.length} episodes:`, filtered.map(e => e.title).join(', '));
+        return filtered;
+    }
+
+    async function resolveLokLokStream(subjectId, detailPath, se, ep, referer) {
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage({ action: 'resolveLokLokStream', subjectId, detailPath, se, ep, referer: referer || location.href }, (res) => {
+                if (res?.success) resolve(res.url);
+                else { console.warn(`[DoulGet] Resolution failed for ep ${ep}:`, res?.error || 'Unknown error'); resolve(null); }
+            });
+        });
+    }
+
     function findAllDownloadLinks() {
         const links = new Set();
-        const downloadExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'zip', 'rar', '7z', 'tar', 'gz', 'txt', 'csv', 'exe', 'dmg', 'apk', 'iso'];
+        const extensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'zip', 'rar', '7z', 'tar', 'gz', 'txt', 'csv', 'exe', 'dmg', 'apk', 'iso', 'msi', 'xz', 'bz2', 'epub', 'azw'];
+        const extRegex = new RegExp(`\\.(${extensions.join('|')})(\\W|$)`, 'i');
 
-        // 1. Links with download attribute
-        document.querySelectorAll('a[download]').forEach(link => {
-            if (link.href && link.href.startsWith('http')) {
-                links.add(link);
+        function scanNode(node) {
+            if (!node) return;
+            const elements = node.querySelectorAll ? node.querySelectorAll('a[href]') : [];
+            elements.forEach(el => {
+                try {
+                    const href = el.href;
+                    if (!href || (!href.startsWith('http') && !href.startsWith('/'))) return;
+                    if (el.hasAttribute('download') || extRegex.test(href)) {
+                        links.add(el);
+                    }
+                } catch (e) {}
+            });
+            if (node.querySelectorAll) {
+                node.querySelectorAll('*').forEach(el => { if (el.shadowRoot) scanNode(el.shadowRoot); });
             }
-        });
-
-        // 2. Links pointing to downloadable files
-        document.querySelectorAll('a[href]').forEach(link => {
-            try {
-                const url = new URL(link.href, location.href);
-                const pathname = url.pathname.toLowerCase();
-
-                // Check if URL ends with a download extension
-                if (downloadExtensions.some(ext => pathname.endsWith(`.${ext}`))) {
-                    links.add(link);
-                }
-            } catch (e) {
-                // Invalid URL, skip
+            if (node === document) {
+                document.querySelectorAll('iframe').forEach(iframe => {
+                    try {
+                        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                        if (iframeDoc) scanNode(iframeDoc);
+                    } catch (e) {}
+                });
             }
-        });
-
+        }
+        scanNode(document);
         return Array.from(links);
     }
 
-    // VIDEO OVERLAY BUTTON
-    function setupVideoOverlays() {
-        const url = location.href;
-
-        // Allow YouTube now (will use page URL)
-        // if (url.includes('youtube.com') || url.includes('youtu.be')) return;
-
-        const videos = findAllVideos();
-        const downloadLinks = findAllDownloadLinks();
-        console.log(`🎬 Setting up overlays for ${videos.length} videos and ${downloadLinks.length} download links`);
-
-        videos.forEach(attachButton);
-        downloadLinks.forEach(attachLinkButton);
+    let lastUserSelectedEpisode = null;
+    function saveEpisodeChoice(ep) {
+        try { sessionStorage.setItem('doul_last_ep', JSON.stringify({ ep: ep, title: document.title, url: window.location.href.split('?')[0] })); } catch(e) {}
+    }
+    function loadEpisodeChoice() {
+        try {
+            const stored = sessionStorage.getItem('doul_last_ep');
+            if (stored) {
+                const cleanUrl = location.href.split('?')[0].split('#')[0];
+                const data = JSON.parse(stored);
+                if (data.url === cleanUrl || data.title === document.title) return data.ep;
+            }
+        } catch(e) {}
+        return null;
     }
 
-    function attachButton(video) {
-        if (video.hasAttribute('data-doul-attached')) return;
-        video.setAttribute('data-doul-attached', 'true');
-
-        const btn = document.createElement('button');
-        btn.innerHTML = '⬇️ DoulDownload';
-        btn.className = 'doul-download-btn';
-
-        // Use FIXED positioning on body (like IDM) - ALWAYS above EVERYTHING
-        btn.style.cssText = `
-            position: fixed !important;
-            z-index: 2147483647 !important;
-            background: #007AFF !important;
-            color: white !important;
-            border: none !important;
-            padding: 8px 12px !important;
-            border-radius: 6px !important;
-            cursor: pointer !important;
-            font-size: 13px !important;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
-            font-weight: 600 !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
-            opacity: 0.95 !important;
-            transition: all 0.2s ease !important;
-            pointer-events: all !important;
-            display: block !important;
-            width: auto !important;
-            height: auto !important;
-        `;
-
-        // Update button position based on video position
-        function updateButtonPosition() {
-            try {
-                const rect = video.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                    btn.style.top = `${rect.top + 10}px`;
-                    btn.style.left = `${rect.left + 10}px`;
-                    btn.style.display = 'block';
-                } else {
-                    btn.style.display = 'none';
+    document.addEventListener('click', (e) => {
+        try {
+            const path = e.composedPath ? e.composedPath() : [e.target];
+            let target = path[0];
+            for (let i = 0; i < 4; i++) {
+                if (!target || !target.getAttribute) break;
+                const sources = [target.textContent, target.innerText, target.getAttribute('alt'), target.getAttribute('title'), target.getAttribute('aria-label'), target.getAttribute('data-episode'), target.value];
+                for (const rawText of sources) {
+                    if (!rawText || typeof rawText !== 'string') continue;
+                    const numMatch = rawText.match(/\b(\d{1,4})\b/);
+                    if (numMatch) {
+                        const val = parseInt(numMatch[1]);
+                        if (val < 1900 && rawText.length < 50) {
+                            const ep = numMatch[1].padStart(2, '0');
+                            lastUserSelectedEpisode = ep;
+                            saveEpisodeChoice(ep);
+                            try { if (window.top !== window.self) window.top.postMessage({ type: 'DOULGET_EPISODE_CLICK', episode: ep, source: 'iframe' }, '*'); } catch(e) {}
+                            return;
+                        }
+                    }
                 }
-            } catch (e) {
-                btn.style.display = 'none';
+                target = target.parentElement || target.parentNode;
+            }
+        } catch(err) {}
+    }, true);
+
+    window.addEventListener('message', (e) => {
+        try { if (e.data && e.data.type === 'DOULGET_EPISODE_CLICK' && e.data.episode) { lastUserSelectedEpisode = e.data.episode; saveEpisodeChoice(e.data.episode); } } catch(err) {}
+    });
+
+    try {
+        const storedEpisode = loadEpisodeChoice();
+        if (storedEpisode) lastUserSelectedEpisode = storedEpisode;
+    } catch(e) {}
+
+    function getSeriesMetadataFromDOM() {
+        if (getContentType() !== 'series') return null;
+        const currentUrl = location.href;
+        if (['youtube.com', 'youtu.be', 'facebook.com', 'instagram.com'].some(s => currentUrl.includes(s))) return null;
+
+        const patterns = [/S(\d+)[._-\s]?E(\d+)/i, /Saison[._-\s]?(\d+)[._-\s]?Episode[._-\s]?(\d+)/i, /Season[._-\s]?(\d+)[._-\s]?Episode[._-\s]?(\d+)/i, /(\d+)x(\d+)/i, /Episode[._-\s]?(\d+)/i, /Ep[._-\s]?(\d+)/i];
+        const activeSelectors = ['.active', '.selected', '.current', '.active-episode', '.is-active', '[class*="active"]', '[class*="selected"]', '.playing', '.now-playing', '[aria-selected="true"]', '.on', 'li.active a', 'a.active', '.active-ep', '.pc-ep-active'];
+        
+        let detectedS = null, detectedE = null, candidateE = null;
+
+        const seasonContainerSelectors = ['[class*="season"] .active', '[class*="season"] .selected', '[class*="season"] [class*="active"]', '[class*="saison"] .active', '[class*="saison"] .selected', '[class*="saison"] [class*="active"]', '.season-list .active', '.season-tabs .active', '.season-nav .active', '[class*="season-item"][class*="active"]', '[class*="season"][class*="current"]', '.tab-content.active [class*="season"]', '.nav-item.active [class*="season"]'];
+        for (const sel of seasonContainerSelectors) {
+            try {
+                const els = document.querySelectorAll(sel);
+                for (const el of els) {
+                    const t = el.textContent.trim();
+                    const sMatch = t.match(/(?:Saison|Season|S)[._\-\s]?(\d+)/i) || t.match(/^(\d+)$/);
+                    if (sMatch) { detectedS = sMatch[1].padStart(2, '0'); break; }
+                }
+            } catch(e) {}
+            if (detectedS) break;
+        }
+
+        if (!detectedS) {
+            for (const sel of activeSelectors) {
+                const tabs = document.querySelectorAll(sel);
+                for (const tab of tabs) {
+                    const t = tab.textContent.trim();
+                    if (/Episode|Ep\s?\d/i.test(t)) continue;
+                    const rangeMatch = t.match(/(?:Saison|Season|S)[._-\s]?(\d+)[-](?:Saison|Season|S)?\d+/i);
+                    if (rangeMatch) { detectedS = rangeMatch[1].padStart(2, '0'); break; }
+                    const sMatch = t.match(/(?:Saison|Season|S)[._-\s]?(\d+)/i);
+                    if (sMatch && !t.includes('Episode')) { detectedS = sMatch[1].padStart(2, '0'); break; }
+                }
+                if (detectedS) break;
             }
         }
 
-        btn.onmouseenter = () => {
-            btn.style.opacity = '1';
-            btn.style.transform = 'scale(1.05)';
-            btn.style.boxShadow = '0 4px 12px rgba(0, 122, 255, 0.5) !important';
-        };
-        btn.onmouseleave = () => {
-            btn.style.opacity = '0.95';
-            btn.style.transform = 'scale(1)';
-            btn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.4) !important';
-        };
+        if (!detectedS) {
+            const dropdowns = document.querySelectorAll('select, .dropdown-toggle, .current-season, .season-select, [class*="season"] select, .select-value, .select-trigger, .custom-select');
+            for (const dd of dropdowns) {
+                let val = dd.tagName === 'SELECT' && dd.selectedIndex >= 0 ? (dd.options[dd.selectedIndex].text || dd.options[dd.selectedIndex].textContent) : (dd.value || dd.textContent.trim());
+                const sMatch = val.match(/(?:Saison|Season|S)[._-\s]?(\d+)/i);
+                if (sMatch) { detectedS = sMatch[1].padStart(2, '0'); break; }
+            }
+        }
 
-        btn.onclick = async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+        if (!detectedS) {
+            const urlStr = window.location.href;
+            const urlSMatch = urlStr.match(/[/\-_.](?:season|saison|s)[-_.]?(\d+)/i);
+            if (urlSMatch) { detectedS = urlSMatch[1].padStart(2, '0'); }
+        }
 
-            const currentUrl = location.href;
-            let downloadUrl = null;
-            let cachedHeaders = {};
+        if (!detectedS || detectedS === '00') {
+            const titleSources = [document.title, document.querySelector('h1')?.textContent || '', document.querySelector('.breadcrumb')?.textContent || '', document.querySelector('[class*="season"]')?.textContent || ''].join(' ');
+            const titleSMatch = titleSources.match(/(?:Saison|Season)\s?(\d+)/i);
+            if (titleSMatch && titleSMatch[1] !== '0') { detectedS = titleSMatch[1].padStart(2, '0'); }
+        }
 
-            // Sites where network sniffer doesn't work well (captures ads/thumbnails/fragments)
-            // OR sites that use DASH/HLS where CDN URLs are fragmented
-            const usePageUrlSites = [
-                'xnxx.com',
-                'xvideos.com',
-                'pornhub.com',
-                'redtube.com',
-                'youporn.com',
-                'spankbang.com',
-                'youtube.com',
-                'youtu.be',
-                'facebook.com',  // DASH fragments with bytestart/byteend
-                'fb.com',
-                'fb.watch',
-                'tiktok.com',    // DASH fragments
-                'instagram.com'  // DASH fragments
-            ];
-
-            const shouldUsePageUrl = usePageUrlSites.some(site => currentUrl.includes(site));
-
-            if (!shouldUsePageUrl) {
-                // Try to get cached URL from background
-                try {
-                    const response = await chrome.runtime.sendMessage({ action: 'getCachedVideoUrl' });
-                    if (response && response.success && response.url) {
-                        downloadUrl = response.url;
-                        cachedHeaders = response.headers || {};
-                        console.log('✅ Using cached CDN URL:', downloadUrl.substring(0, 60));
+        for (const sel of activeSelectors) {
+            const els = document.querySelectorAll(sel);
+            for (const el of els) {
+                if (!el || !el.textContent) continue;
+                const t = el.textContent.trim();
+                for (const p of patterns) {
+                    const m = t.match(p);
+                    if (m) {
+                        if (m[2]) { detectedS = m[1].padStart(2, '0'); detectedE = m[2].padStart(2, '0'); }
+                        else { detectedE = m[1].padStart(2, '0'); }
+                        break;
                     }
-                } catch (err) {
-                    console.log('⚠️ Failed to get cached URL:', err);
                 }
-            } else {
-                console.log('🚫 Site blacklist/YouTube detected, using page URL');
-            }
-
-            // Fallback: Use page URL
-            if (!downloadUrl) {
-                downloadUrl = currentUrl;
-                console.log('✅ Using page URL as fallback:', downloadUrl);
-            }
-
-            // SMART PERMALINK EXTRACTION (TikTok / Instagram Feed)
-            // If on feed (no specific ID in URL), find the link associated with this video element
-            const isGenericFeedUrl = (
-                (currentUrl.includes('tiktok.com') && !currentUrl.includes('/video/')) ||
-                (currentUrl.includes('instagram.com') && !currentUrl.includes('/p/') && !currentUrl.includes('/reel/'))
-            );
-
-            if (isGenericFeedUrl) {
-                console.log('🔍 Generic feed detected, searching for permalink...');
-                try {
-                    // Look for parent anchor tag or nearby sibling
-                    let targetElement = video;
-                    let foundLink = null;
-
-                    // 1. Check parents up to 5 levels
-                    let parent = video.parentElement;
-                    for (let i = 0; i < 7; i++) {
-                        if (!parent) break;
-
-                        // Check for direct anchor
-                        if (parent.tagName === 'A') {
-                            const href = parent.getAttribute('href');
-                            if (href && (href.includes('/video/') || href.includes('/reel/') || href.includes('/p/'))) {
-                                foundLink = href;
-                                break;
-                            }
-                        }
-
-                        // Check for anchor inside this parent
-                        const anchors = parent.querySelectorAll('a');
-                        for (const anchor of anchors) {
-                            const href = anchor.getAttribute('href');
-                            if (href && (href.includes('/video/') || href.includes('/reel/') || href.includes('/p/'))) {
-                                foundLink = href;
-                                break;
-                            }
-                        }
-                        if (foundLink) break;
-
-                        parent = parent.parentElement;
-                    }
-
-                    if (foundLink) {
-                        // Fix relative URLs
-                        if (foundLink.startsWith('/')) {
-                            foundLink = window.location.origin + foundLink;
-                        }
-                        downloadUrl = foundLink;
-                        console.log('✅ SMART PERMALINK FOUND:', downloadUrl);
-                    } else {
-                        console.warn('❌ Could not find permalink for this video');
-                        btn.textContent = '❌ Open Video';
-                        btn.style.background = '#FF3B30 !important';
-                        btn.title = "Click video to open detail page first";
-                        setTimeout(() => {
-                            btn.textContent = '⬇️ DoulDownload';
-                            btn.style.background = '#007AFF !important';
-                            btn.title = "";
-                        }, 4000);
-                        return;
-                    }
-                } catch (e) {
-                    console.error('Permalink extraction error:', e);
+                if (detectedE) break;
+                const looseEx = t.match(/\b(\d{1,3})\b/);
+                if (looseEx && t.length < 15) {
+                    const val = parseInt(looseEx[1]);
+                    if (val < 1900) candidateE = looseEx[1].padStart(2, '0');
                 }
             }
+            if (detectedE) break;
+        }
 
-            const filename = `Video_${document.title.replace(/[^\w]/g, '_').substring(0, 30)}_${Date.now()}.mp4`;
+        if (!detectedE && candidateE) {
+            const context = detectedS || /Saison|Season|S\d+/i.test(document.title);
+            if (context) { detectedE = candidateE; if (!detectedS) detectedS = '01'; }
+        }
 
-            btn.textContent = 'Starting...';
+        if (!detectedE && lastUserSelectedEpisode) detectedE = lastUserSelectedEpisode;
+        if (detectedE === '00') detectedE = null; 
 
-            try {
-                chrome.runtime.sendMessage({
-                    action: 'sendDownload',
-                    url: downloadUrl,
-                    filename: filename,
-                    type: 'video/mp4',
-                    category: 'video',
-                    headers: cachedHeaders
-                }, (response) => {
-                    if (chrome.runtime.lastError) {
-                        console.error('Extension error:', chrome.runtime.lastError.message);
-                        btn.textContent = '🔄 Reload Page';
-                        btn.style.background = '#FF9500 !important';
-                        btn.title = "Extension was reloaded. Please refresh this page (F5)";
-                        return;
-                    }
-
-                    if (response && response.success) {
-                        btn.textContent = '⏳ Preparing...';
-                        btn.style.background = '#007AFF !important';
-                        btn.style.pointerEvents = 'none';
-
-                        // Poll for progress updates
-                        const pollUrl = downloadUrl;
-                        let pollAttempts = 0;
-                        const pollInterval = setInterval(async () => {
-                            pollAttempts++;
-                            try {
-                                const statusRes = await fetch(`http://localhost:8765/download-status?url=${encodeURIComponent(pollUrl)}`);
-                                if (statusRes.ok) {
-                                    const data = await statusRes.json();
-
-                                    if (data.status === 'completed') {
-                                        clearInterval(pollInterval);
-                                        btn.textContent = '✅ Finished!';
-                                        btn.style.background = '#34C759 !important';
-                                        btn.style.pointerEvents = 'all';
-                                        setTimeout(() => {
-                                            btn.textContent = '⬇️ DoulDownload';
-                                            btn.style.background = '#007AFF !important';
-                                        }, 3000);
-                                    } else if (data.status === 'downloading') {
-                                        btn.textContent = `⏳ ${Math.round(data.progress)}%`;
-                                    } else if (data.status === 'error' || data.status === 'cancelled') {
-                                        clearInterval(pollInterval);
-                                        btn.textContent = data.status === 'cancelled' ? '⚠️ Cancelled' : '❌ Error';
-                                        btn.style.background = (data.status === 'cancelled' ? '#FF9500' : '#FF3B30') + ' !important';
-                                        btn.style.pointerEvents = 'all';
-                                        setTimeout(() => {
-                                            btn.textContent = '⬇️ DoulDownload';
-                                            btn.style.background = '#007AFF !important';
-                                        }, 3000);
-                                    }
-                                }
-                            } catch (e) {
-                                // If app is closed or connection lost
-                                if (pollAttempts > 10) {
-                                    clearInterval(pollInterval);
-                                    btn.textContent = '⬇️ DoulDownload';
-                                    btn.style.pointerEvents = 'all';
-                                }
-                            }
-                        }, 1000);
-                    } else {
-                        btn.textContent = '❌ Error';
-                        btn.style.background = '#FF3B30 !important';
-                        setTimeout(() => {
-                            btn.textContent = '⬇️ DoulDownload';
-                            btn.style.background = '#007AFF !important';
-                        }, 3000);
-                    }
-                });
-            } catch (error) {
-                console.error('Extension context error:', error);
-                btn.textContent = '🔄 Reload Page';
-                btn.style.background = '#FF9500 !important';
-                btn.title = "Extension was reloaded. Please refresh this page (F5)";
+        if (detectedE) {
+            const sVal = parseInt(detectedS || '1');
+            const eVal = parseInt(detectedE);
+            if (sVal > 100 || eVal > 1000) return null;
+            if (!detectedS) {
+                const rangeTitle = document.title.match(/(?:S|Saison)\s?(\d+)[-–—]?S?\d+/i);
+                if (rangeTitle) detectedS = rangeTitle[1].padStart(2, '0');
             }
-        };
-
-        // Attach to body (not video parent) - CRITICAL for z-index to work
-        document.body.appendChild(btn);
-
-        // Update position initially and on scroll/resize
-        updateButtonPosition();
-        window.addEventListener('scroll', updateButtonPosition, { passive: true });
-        window.addEventListener('resize', updateButtonPosition, { passive: true });
-
-        // Update position every 500ms in case video moves
-        setInterval(updateButtonPosition, 500);
-
-        console.log('✅ Button attached to video (fixed position on body)');
+            if (!detectedS || detectedS === '00') detectedS = '01';
+            if (currentUrl.includes('palkad') && !/Saison|Season/i.test(document.title)) return null;
+            return `S${detectedS}E${detectedE}`;
+        }
+        return null;
     }
 
-    // ATTACH DOWNLOAD BUTTON TO DOCUMENT LINKS
+    function getContentType() {
+        const url = window.location.href.toLowerCase().split('?')[0];
+        const bodyText = document.body.innerText.substring(0, 5000); 
+        const isLokLok = url.includes('lok-lok.cc') || url.includes('movie-box.co') || url.includes('moviebox');
+        const docExtensions = ['.pdf', '.zip', '.rar', '.7z', '.exe', '.msi', '.apk', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'];
+        if (docExtensions.some(ext => url.endsWith(ext))) return 'document';
+
+        const hasSeriesIndicators = document.querySelector('.season-select, .current-season, [class*="play-list"], [class*="episode-list"], .pc-ep-contain') || 
+                                    document.querySelectorAll('.pc-btn, .pc-ep, [class*="episode-item"]').length > 2 ||
+                                    /Saison|Season|Episode|Ep\s?\d/i.test(document.title) ||
+                                    /S\d+E\d+/i.test(document.title) ||
+                                    (isLokLok && (bodyText.includes('Season') || bodyText.includes('Saison') || bodyText.includes('Episode') || bodyText.includes('Resource')));
+        
+        if (hasSeriesIndicators) return 'series';
+        if (isLokLok) return 'movie'; 
+        if (url.includes('palkad') || url.includes('/film/') || url.includes('/movie/')) return 'movie';
+        return 'movie';
+    }
+
+    function getSeasonOnly() {
+        const currentUrl = location.href;
+        try {
+            const dd = document.querySelector('.season-select') || document.querySelector('.current-season') || document.querySelector('[class*="season"] .active');
+            if (dd) {
+                const text = dd.textContent.trim();
+                const sMatch = text.match(/(?:Saison|Season|S)[._-\s]?(\d+)/i) || text.match(/^Season\s+(\d+)$/i) || text.match(/^(\d+)$/);
+                if (sMatch) return `Season ${parseInt(sMatch[1])}`;
+            }
+        } catch(e) {}
+        const urlSMatch = currentUrl.match(/[?&]se=(\d+)/i) || currentUrl.match(/[/\-_.](?:season|saison|s)[-_.]?(\d+)/i);
+        if (urlSMatch) return `Season ${parseInt(urlSMatch[1])}`;
+        const titleMatch = document.title.match(/(?:Saison|Season)\s?(\d+)/i);
+        if (titleMatch) return `Season ${parseInt(titleMatch[1])}`;
+        const metadata = getSeriesMetadataFromDOM();
+        if (metadata) {
+            const match = metadata.match(/S(\d+)/i);
+            if (match) return `Season ${parseInt(match[1])}`;
+        }
+        return null;
+    }
+
+    function getCleanTitle() {
+        const genericNames = ['free movies', 'watch online', 'streaming', 'lok-lok', 'loklok', 'hakunaymatata', 'moovbob', 'film streaming', 'regarder', 'gratuit', 'vostfr', 'vf'];
+        const isInIframe = (window !== window.top);
+        
+        const isGeneric = (t) => {
+            if (!t || t.length < 3) return true;
+            const lower = t.toLowerCase();
+            return genericNames.some(g => lower.includes(g)) && t.length < 40;
+        };
+        const looksLikeHash = (s) => {
+            if (!s || s.length < 3) return true;
+            if (!/[\s\-_]/.test(s) && /\d/.test(s) && s.length < 30) return true;
+            if (/^[A-Za-z0-9]+$/.test(s) && s.length < 20 && !/[\s\-_]/.test(s)) return true;
+            if (/^(iframe|embed|player|watch|video|play)$/i.test(s)) return true;
+            return false;
+        };
+
+        if (isInIframe) {
+            const iframeOgTitle = document.querySelector('meta[property="og:title"]')?.content?.trim() || '';
+            if (iframeOgTitle && !isGeneric(iframeOgTitle) && !looksLikeHash(iframeOgTitle)) return iframeOgTitle;
+            if (window.location.hostname.includes('vidzy.org') || window.location.hostname.includes('sibnet.ru')) return 'download'; 
+            return 'download'; 
+        }
+
+        const isSocial = ['youtube.com', 'youtu.be', 'facebook.com', 'instagram.com'].some(s => window.location.hostname.includes(s));
+        let title = '';
+        if (isSocial) {
+            title = document.querySelector('h1')?.textContent?.trim() || document.title.replace(/ - YouTube$/, '').trim();
+        } else {
+            title = document.querySelector('meta[property="og:title"]')?.content?.trim() || '';
+            if (isGeneric(title)) title = document.querySelector('h1')?.textContent?.trim() || '';
+        }
+
+        if (isGeneric(title)) {
+            const titleSelectors = ['.pc-detail-title', '.pc-video-title', '.video-title', '.movie-title', '.title-name', '.detail-title', '.pc-detail-title', '[class*="title"]'];
+            for (const sel of titleSelectors) {
+                try {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        const t = el.textContent.trim();
+                        if (t.length > 2 && t.length < 120 && !isGeneric(t)) { title = t; break; }
+                    }
+                } catch(e) {}
+            }
+        }
+
+        if (isGeneric(title)) {
+            try {
+                const pathParts = window.location.pathname.split('/').filter(p => p.length > 3);
+                const slug = pathParts[pathParts.length - 1] || '';
+                if (slug.length > 5 && !looksLikeHash(slug)) {
+                    let cleanSlug = slug.replace(/^\d+[-_]/, '').replace(/\.html?$/i, '');
+                    cleanSlug = cleanSlug.replace(/[-_][A-Za-z0-9]{8,}$/, '').replace(/[-_]\d{10,}$/, '').replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+                    if (cleanSlug.length > 3 && !isGeneric(cleanSlug) && !looksLikeHash(cleanSlug)) title = cleanSlug;
+                }
+            } catch(e) {}
+        }
+        if (isGeneric(title)) title = (document.title || '').replace(/\s+/g, ' ').trim();
+
+        title = title.replace(/(?:Saison|Season|S)[._-\s]?\d+/gi, ' ')
+                     .replace(/(?:Episode|Ep|E)[._-\s]?\d+/gi, ' ')
+                     .replace(/\d+x\d+/gi, ' ')
+                     .replace(/[-–—|]\s*(Free Movies|Watch|Online|Streaming|HD|VF|VOSTFR|Gratuit).*/gi, '')
+                     .replace(/\s+/g, ' ').trim()
+                     .replace(/[\s\-–—_|:.,;]+$/, '').trim();
+
+        const metadata = getSeriesMetadataFromDOM();
+        if (metadata) {
+            title = title.replace(/(?:^|[\s_.\-\[(])S\d+\s*[-–—]\s*S?\d+(?:$|[\s_.\-\])])/gi, ' ').replace(/(?:^|[\s_.\-\[(])Saison\s?\d+\s*[-–—]\s*\d+(?:$|[\s_.\-\])])/gi, ' ').replace(/\s+/g, ' ').trim();
+            if (!title.includes(metadata) && !/S\d+E\d+/i.test(title)) title = `${title} ${metadata}`;
+        }
+        return title || 'download';
+    }
+
+    function setupVideoOverlays() {
+        const url = location.href;
+        const siteBlacklist = ['mail.google.com', 'gmail.com', 'outlook.live.com', 'outlook.office.com', 'mail.yahoo.com', 'docs.google.com', 'sheets.google.com', 'slides.google.com', 'drive.google.com', 'accounts.google.com', 'myaccount.google.com', 'web.whatsapp.com', 'web.telegram.org', 'notion.so', 'trello.com', 'slack.com', 'figma.com', 'canva.com'];
+        if (siteBlacklist.some(site => url.includes(site))) return;
+
+        const videos = findAllVideos();
+        const downloadLinks = findAllDownloadLinks();
+        videos.forEach(attachButton);
+        downloadLinks.forEach(link => {
+            try { attachLinkButton(link); } catch (e) {}
+        });
+    }
+
+    function attachButton(video) {
+        const isTopFrame = window === window.top;
+        const currentUrl = location.href;
+        const videoSrc = video.currentSrc || video.src;
+        const isSocialSite = ['youtube.com', 'youtu.be', 'tiktok.com', 'instagram.com', 'facebook.com'].some(site => currentUrl.includes(site));
+        if (isSocialSite && !isTopFrame) return;
+
+        if (video.hasAttribute('data-doul-attached')) {
+            const lastSrc = video.getAttribute('data-doul-last-url');
+            const lastHref = video.getAttribute('data-doul-last-href');
+            if ((lastSrc && lastSrc !== videoSrc) || (lastHref && lastHref !== currentUrl)) {
+                if (video.doulContainer && video.doulContainer.innerText.includes('%')) return; 
+                if (video.doulContainer) { video.doulContainer.remove(); video.doulContainer = null; }
+                video.removeAttribute('data-doul-attached');
+            } else return;
+        }
+        
+        video.setAttribute('data-doul-attached', 'true');
+        video.setAttribute('data-doul-last-url', videoSrc);
+        video.setAttribute('data-doul-last-href', currentUrl);
+
+        const allVideos = findAllVideos();
+        document.querySelectorAll('.doul-download-container').forEach(cont => {
+             if (!allVideos.some(v => v.doulContainer === cont)) cont.remove();
+        });
+
+        const container = document.createElement('div');
+        video.doulContainer = container; 
+        container.className = 'doul-download-container';
+
+        const overlaidSites = ['facebook.com', 'fb.com', 'fb.watch', 'tiktok.com', 'instagram.com', 'xvideos.com', 'xnxx.com', 'pornhub.com', 'youporn.com'];
+        const isOverlaid = overlaidSites.some(s => location.href.includes(s));
+        const posTop = isOverlaid ? 'auto' : '10px';
+        const posBottom = isOverlaid ? '120px' : 'auto';
+
+        container.style.cssText = `
+            all: unset !important;
+            position: absolute !important;
+            top: ${posTop} !important;
+            bottom: ${posBottom} !important;
+            left: 10px !important;
+            z-index: 2147483647 !important;
+            display: inline-flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            gap: 10px !important;
+            padding: 8px !important;
+            border-radius: 12px !important;
+            background: rgba(15, 23, 42, 0.7) !important;
+            backdrop-filter: blur(10px) !important;
+            -webkit-backdrop-filter: blur(10px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+            width: auto !important;
+            height: auto !important;
+            white-space: nowrap !important;
+            pointer-events: auto !important;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            opacity: 0.95 !important;
+        `;
+
+        function createActionButton(text, isAudio) {
+            const btn = document.createElement('button');
+            btn.innerHTML = text;
+            btn.style.cssText = `
+                all: unset !important;
+                background: ${isAudio ? '#6366f1' : '#007AFF'} !important;
+                color: #ffffff !important;
+                border: none !important;
+                padding: 6px 12px !important;
+                border-radius: 6px !important;
+                cursor: pointer !important;
+                font-size: 12px !important;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+                font-weight: 600 !important;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
+                opacity: 0.98 !important;
+                transition: all 0.2s ease !important;
+                white-space: nowrap !important;
+                display: inline-flex !important;
+                flex-shrink: 0 !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 5px !important;
+                z-index: 2147483647 !important;
+            `;
+            btn.onmouseenter = () => btn.style.opacity = '1';
+            btn.onmouseleave = () => btn.style.opacity = '0.98';
+            btn.onclick = async (e) => {
+                e.preventDefault(); e.stopPropagation();
+                const currentUrl = location.href;
+                let downloadUrl = null, cachedHeaders = {};
+                const usePageUrlSites = ['xnxx.com', 'xvideos.com', 'pornhub.com', 'redtube.com', 'youporn.com', 'spankbang.com', 'youtube.com', 'youtu.be', 'facebook.com', 'fb.com', 'fb.watch', 'tiktok.com', 'instagram.com'];
+                if (usePageUrlSites.some(site => currentUrl.includes(site))) {
+                    downloadUrl = currentUrl;
+                } else {
+                    const mapped = videoUrlMap.get(video);
+                    if (mapped && mapped.cdnUrl) { downloadUrl = mapped.cdnUrl; cachedHeaders = mapped.headers || {}; }
+                    if (!downloadUrl) {
+                        try {
+                            const res = await chrome.runtime.sendMessage({ action: 'getCachedVideoUrl' });
+                            if (res && res.success && res.url) { downloadUrl = res.url; cachedHeaders = res.headers || {}; }
+                        } catch (err) { }
+                    }
+                    if (!downloadUrl) {
+                        if (['lok-lok.cc', 'hakunaymatata.com', 'moovbob.fr'].some(site => currentUrl.includes(site))) {
+                            btn.textContent = dgetMessage('waitingLink', '...');
+                            setTimeout(() => { btn.innerHTML = text; }, 3000); return;
+                        }
+                        downloadUrl = currentUrl;
+                    }
+                }
+                try {
+                    const cleanTitle = getCleanTitle();
+                    const filename = `${cleanTitle}${isAudio ? '.mp3' : '.mp4'}`;
+                    btn.textContent = '...';
+                    chrome.runtime.sendMessage({ action: 'sendDownload', url: downloadUrl, filename: filename, type: isAudio ? 'audio/mpeg' : 'video/mp4', audioOnly: isAudio, headers: { ...cachedHeaders, 'Referer': location.href } }, (response) => {
+                        if (chrome.runtime.lastError || !response?.success) { btn.textContent = '🔄'; return; }
+                        btn.textContent = '⏳'; btn.style.pointerEvents = 'none';
+                        let lastPercentage = 0;
+                        const poll = setInterval(() => {
+                            if (!isContextValid()) { clearInterval(poll); return; }
+                            chrome.runtime.sendMessage({ action: 'getDownloadStatus', url: downloadUrl, audioOnly: isAudio }, (res) => {
+                                if (chrome.runtime.lastError || !res?.success) { if (lastPercentage > 95) complete(); return; }
+                                const data = res.data;
+                                if (data.status === 'completed') complete();
+                                else if (data.status === 'downloading') { lastPercentage = Math.round(data.progress || 0); btn.textContent = `${lastPercentage}%`; }
+                                else if (['error', 'cancelled'].includes(data.status)) { clearInterval(poll); btn.innerHTML = text; btn.style.pointerEvents = 'all'; }
+                            });
+                        }, 1000);
+                        function complete() {
+                            clearInterval(poll); btn.textContent = '✅'; btn.style.background = '#34C759 !important';
+                            setTimeout(() => { btn.innerHTML = text; btn.style.background = (isAudio ? '#6366f1' : '#007AFF') + ' !important'; btn.style.pointerEvents = 'all'; }, 2000);
+                        }
+                    });
+                } catch (e) { btn.textContent = '🔄'; }
+            };
+            return btn;
+        }
+
+        const btnVideo = createActionButton(dgetMessage('videoBtn', '🎬 Vidéo'), false);
+        const btnAudio = createActionButton(dgetMessage('audioBtn', '🎵 Audio'), true);
+        container.appendChild(btnVideo); container.appendChild(btnAudio);
+
+        let parentContainer = null;
+        if (location.href.includes('youtube.com')) parentContainer = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
+        else {
+            let candidate = video.parentElement;
+            for (let i = 0; i < 10 && candidate && candidate !== document.body; i++) {
+                const cRect = candidate.getBoundingClientRect();
+                if (cRect.width >= 200 && cRect.height >= 100) { parentContainer = candidate; break; }
+                candidate = candidate.parentElement;
+            }
+        }
+        if (!parentContainer) parentContainer = video.parentElement || document.body;
+        if (window.getComputedStyle(parentContainer).position === 'static') parentContainer.style.setProperty('position', 'relative', 'important');
+
+        const existing = parentContainer.querySelector('.doul-download-container');
+        if (existing) {
+             if (video.doulContainer !== existing) {
+                 if (video.doulContainer && video.doulContainer.parentNode) video.doulContainer.remove();
+                 video.doulContainer = existing;
+             }
+             return;
+        }
+        parentContainer.appendChild(container);
+        video.addEventListener('loadstart', () => { 
+            btnVideo.innerHTML = dgetMessage('videoBtn', '🎬 Vidéo'); 
+            btnAudio.innerHTML = dgetMessage('audioBtn', '🎵 Audio'); 
+        });
+    }
+
     function attachLinkButton(link) {
         if (link.hasAttribute('data-doul-attached')) return;
         link.setAttribute('data-doul-attached', 'true');
+        const btn = document.createElement('button');
+        btn.innerHTML = '⬇️';
+        btn.style.cssText = 'all:unset;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin:0 5px;background:#007AFF;color:white;border-radius:4px;cursor:pointer;font-size:10px;vertical-align:middle;z-index:100';
+        btn.onclick = (e) => {
+            e.preventDefault(); e.stopPropagation();
+            btn.textContent = '⏳';
+            const filename = (link.textContent || 'download').trim().substring(0, 50);
+            chrome.runtime.sendMessage({ action: 'sendDownload', url: link.href, filename: filename, headers: { 'Referer': location.href } }, (res) => {
+                btn.textContent = res?.success ? '✅' : '❌';
+                setTimeout(() => { btn.textContent = '⬇️'; }, 2000);
+            });
+        };
+        link.after(btn);
+    }
 
-        const btn = document.createElement('span');
-        btn.innerHTML = ' ⬇️';
-        btn.className = 'doul-download-link-btn';
-        btn.title = 'Download with DoulBrowser';
+    let currentFloatingCapture = null;
+    function showFloatingCapture(url, filename, headers) {
+        if (getContentType() !== 'series' && !filename) return;
+        if (!isContextValid()) return;
+        if (currentFloatingCapture) currentFloatingCapture.remove();
 
-        btn.style.cssText = `
-            display: inline-block !important;
-            margin-left: 5px !important;
-            cursor: pointer !important;
-            font-size: 16px !important;
-            vertical-align: middle !important;
-            opacity: 0.7 !important;
-            transition: all 0.2s ease !important;
+        const bar = document.createElement('div');
+        bar.id = 'doulget-capture-bar';
+        const contentType = getContentType();
+        const cleanName = filename || url.split('/').pop().split('?')[0] || 'Fichier détecté';
+        
+        let displayTitle = dgetMessage('captureTitle', 'DoulGet Capture');
+        if (contentType === 'series') displayTitle = dgetMessage('seriesDetected', 'Série détectée');
+
+        bar.style.cssText = `
+            all: unset !important;
+            position: fixed !important;
+            top: 15px !important;
+            right: 15px !important;
+            width: 380px !important;
+            max-height: 85vh !important;
+            background: #1c1c1e !important;
+            border: 2px solid #007AFF !important;
+            border-radius: 14px !important;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6) !important;
+            z-index: 2147483647 !important;
+            padding: 12px 16px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 12px !important;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+            color: #ffffff !important;
+            pointer-events: auto !important;
+            overflow: hidden !important;
         `;
 
-        btn.onmouseenter = () => {
-            btn.style.opacity = '1';
-            btn.style.transform = 'scale(1.2)';
-        };
-        btn.onmouseleave = () => {
-            btn.style.opacity = '0.7';
-            btn.style.transform = 'scale(1)';
-        };
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; width:100%';
+        header.innerHTML = `<span style="font-size:13px; font-weight:700">${displayTitle}</span><button id="doul-close-bar" style="all:unset; cursor:pointer; opacity:0.5">✕</button>`;
+        
+        const body = document.createElement('div');
+        body.style.cssText = 'font-size:12px; opacity:0.9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap';
+        body.textContent = cleanName;
 
-        btn.onclick = async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+        const episodes = findAllEpisodes();
+        const epWrapper = document.createElement('div');
+        epWrapper.style.display = 'flex';
+        epWrapper.style.flexDirection = 'column';
 
-            const downloadUrl = link.href;
-            const filename = link.download || link.textContent.trim() || downloadUrl.split('/').pop();
+        function renderEpisodeList(list) {
+            epWrapper.innerHTML = '';
+            if (list.length === 0) return;
+            const listToggle = document.createElement('div');
+            listToggle.style.cssText = 'display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:6px';
+            listToggle.innerHTML = `<span style="font-size:12px; font-weight:700; color:#007AFF">Épisodes (${list.length})</span><span style="font-size:11px; cursor:pointer" id="doul-toggle-list">Masquer</span>`;
+            epWrapper.appendChild(listToggle);
 
-            console.log('📄 Document download requested:', downloadUrl);
+            const epList = document.createElement('div');
+            epList.id = 'doulget-ep-list';
+            epList.style.cssText = 'display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; margin-top:8px';
+            list.forEach((ep, idx) => {
+                const item = document.createElement('div');
+                item.style.cssText = 'display:flex; align-items:center; gap:10px; padding:6px; background:rgba(255,255,255,0.03); border-radius:8px; cursor:pointer';
+                item.innerHTML = `<input type="checkbox" checked class="doul-ep-checkbox" data-index="${idx}"> <span style="font-size:12px">${ep.title}</span>`;
+                item.onclick = (e) => { if (e.target.tagName !== 'INPUT') { const cb = item.querySelector('input'); cb.checked = !cb.checked; updateBatchCount(); } };
+                item.querySelector('input').onchange = updateBatchCount;
+                epList.appendChild(item);
+            });
+            epWrapper.appendChild(epList);
 
-            // Send to DoulBrowser
-            try {
-                await fetch('http://localhost:8765/download-detected', {
+            const batchBtn = document.createElement('button');
+            batchBtn.style.cssText = 'all:unset; background:#4f46e5; color:white; padding:10px; border-radius:10px; text-align:center; font-size:13px; font-weight:700; cursor:pointer; margin-top:10px';
+            epWrapper.appendChild(batchBtn);
+
+            listToggle.querySelector('#doul-toggle-list').onclick = () => { epList.style.display = epList.style.display === 'none' ? 'flex' : 'none'; listToggle.querySelector('#doul-toggle-list').textContent = epList.style.display === 'none' ? 'Afficher' : 'Masquer'; };
+
+            async function updateBatchCount() {
+                const count = Array.from(epWrapper.querySelectorAll('.doul-ep-checkbox')).filter(cb => cb.checked).length;
+                batchBtn.textContent = `Télécharger ${count} épisodes`;
+                batchBtn.disabled = count === 0;
+            }
+            updateBatchCount();
+
+            batchBtn.onclick = async () => {
+                const selected = Array.from(epWrapper.querySelectorAll('.doul-ep-checkbox')).filter(cb => cb.checked).map(cb => list[parseInt(cb.getAttribute('data-index'))]);
+                if (selected.length === 0) return;
+                const baseTitle = getCleanTitle().replace(/S\d+E\d+/i, '').trim();
+                const isLokLok = location.href.includes('lok-lok.cc') || location.href.includes('movie-box.co') || location.href.includes('moviebox');
+                if (isLokLok) {
+                    batchBtn.textContent = 'Capture...';
+                    batchBtn.disabled = true;
+                    // [v1.9.7] Tell background not to auto-send individual downloads during batch
+                    chrome.storage.local.set({ batchMode: true });
+                    const items = [];
+                    const seMatch = location.href.match(/[?&]se=(\d+)/) || location.href.match(/[?&]detailSe=(\d+)/);
+                    const currentSe = seMatch ? parseInt(seMatch[1]) : 1;
+                    for (let i = 0; i < selected.length; i++) {
+                        const ep = selected[i];
+                        batchBtn.textContent = `Capture ${i+1}/${selected.length}`;
+                        // [v1.9.9.2] Enhanced episode button finder with broader selectors and diagnostic logging
+                        const epSelectors = '.pc-ep, .ep-item, .pc-btn, .pc-ep-active, .pc-ep-contain span, .pc-ep-contain div, [class*="episode"], [class*="ep-"], [class*="play-list"] span, [class*="play-list"] div, .ant-tabs-tab, .ant-tabs-tab-btn, .vui-tab, .vui-episode, [class*="item"] span, [class*="item"] div';
+                        const allEpElements = Array.from(document.querySelectorAll(epSelectors));
+                        
+                        // Also search for any clickable element with just the episode number as text
+                        const allClickables = Array.from(document.querySelectorAll('span, div, button, a, li'));
+                        
+                        const epNumStr = ep.epNum !== undefined ? String(ep.epNum) : null;
+                        const epNumPadded = ep.epNum !== undefined ? String(ep.epNum).padStart(2, '0') : null;
+                        
+                        if (!epNumStr) {
+                            console.warn(`[DoulGet Batch] ❌ Episode button not found for Ep ${ep.epNum} (epNum is undefined)`);
+                        } else {
+                            // Strategy 1: Match from known selectors
+                            let epBtns = allEpElements.filter(el => {
+                                const t = el.textContent.trim();
+                                return t === epNumPadded || t === epNumStr || t === `Episode ${epNumStr}` || t === `Ep ${epNumStr}` || t === `EP${epNumStr}` || t === `Ep.${epNumStr}`;
+                            });
+                            
+                            // Strategy 2: If nothing found, search ALL clickables with just the number
+                            if (epBtns.length === 0) {
+                                epBtns = allClickables.filter(el => {
+                                    const t = el.textContent.trim();
+                                    // Must be a leaf element (no children with text) and visible
+                                    if (el.children.length > 2) return false;
+                                    if (el.offsetHeight < 5 || el.offsetWidth < 5) return false;
+                                    // Check ancestor isn't in excluded areas
+                                    const parentClass = (el.parentElement?.className || '').toLowerCase();
+                                    if (['player', 'quality', 'volume', 'speed', 'subtitle', 'ad-', 'footer', 'comment'].some(k => parentClass.includes(k))) return false;
+                                    return t === epNumPadded || t === epNumStr;
+                                });
+                            }
+                            
+                            // Strategy 3: Log diagnostic info if still nothing found
+                            if (epBtns.length === 0 && i === 0) {
+                                // Only log diagnostics for first failure to avoid spam
+                                const sampleElements = allClickables
+                                    .filter(el => el.offsetHeight > 5 && el.textContent.trim().length <= 4 && /^\d+$/.test(el.textContent.trim()))
+                                    .slice(0, 10)
+                                    .map(el => ({ tag: el.tagName, class: el.className, text: el.textContent.trim(), parentClass: el.parentElement?.className }));
+                                console.log('[DoulGet Batch] 🔍 Diagnostic: clickable number elements on page:', JSON.stringify(sampleElements, null, 2));
+                                console.log('[DoulGet Batch] 🔍 Known selectors found:', allEpElements.length, 'elements');
+                                console.log('[DoulGet Batch] 🔍 Looking for epNum:', epNumStr, 'or', epNumPadded);
+                            }
+
+                        if (epBtns.length > 0) {
+                            // Clear stale cache BEFORE clicking to avoid race condition
+                            delete lokLokStreamCache[ep.epNum];
+                            epBtns[0].click();
+                            const stream = await new Promise(resolve => {
+                                const start = Date.now();
+                                const check = setInterval(() => {
+                                    // Key is just ep number; cached value is {url, se}
+                                    if (lokLokStreamCache[ep.epNum]) { clearInterval(check); resolve(lokLokStreamCache[ep.epNum]); }
+                                    if (Date.now() - start > 10000) { clearInterval(check); resolve(null); }
+                                }, 200);
+                            });
+                            if (stream) {
+                                const seStr = String(stream.se).padStart(2, '0');
+                                const epStr = String(ep.epNum).padStart(2, '0');
+                                console.log(`[DoulGet Batch] ✅ S${seStr}E${epStr} captured`);
+                                items.push({ url: stream.url, filename: `${baseTitle} - S${seStr}E${epStr}.mp4`, _se: stream.se });
+                            } else {
+                                console.warn(`[DoulGet Batch] ❌ Failed to capture stream for Ep ${ep.epNum} (Timeout)`);
+                            }
+                        } else {
+                            console.warn(`[DoulGet Batch] ❌ Episode button not found for Ep ${ep.epNum}`);
+                        }
+                    }
+                    await new Promise(r => setTimeout(r, 400));
+                }
+                    console.log(`[DoulGet Batch] 📦 Prepared ${items.length} items for Lok-lok batch. Sending message...`);
+                    // Determine season: prefer se from cache, fallback to currentSe
+                    const detectedSe = (items.length > 0 && items[0]._se) ? items[0]._se : currentSe;
+                    const playlistTitle = `${baseTitle} - Season ${detectedSe}`;
+                    // Strip internal _se field before sending
+                    const cleanItems = items.map(function(item) { const obj = {}; obj.url = item.url; obj.filename = item.filename; return obj; });
+                    console.log(`[DoulGet Batch] 📂 Playlist title: "${playlistTitle}"`);
+                    chrome.storage.local.set({ batchMode: false });
+                    chrome.runtime.sendMessage({ action: 'sendBatchDownload', playlistTitle: playlistTitle, items: cleanItems, headers: { 'Referer': location.origin + '/' } }, (res) => { 
+                        console.log('[DoulGet Batch] Message response received:', res);
+                        bar.remove(); 
+                    });
+                } else {
+                    const items = selected.map(ep => ({ url: ep.url || url, filename: `${baseTitle} - ${ep.title}.mp4` }));
+                    chrome.runtime.sendMessage({ action: 'sendBatchDownload', playlistTitle: baseTitle, items: items }, (res) => { bar.remove(); });
+                }
+            };
+        }
+        renderEpisodeList(episodes);
+
+        const footer = document.createElement('div');
+        footer.style.cssText = 'display:flex; gap:8px; margin-top:8px';
+        const dlBtn = document.createElement('button');
+        dlBtn.textContent = 'Télécharger l\'épisode';
+        dlBtn.style.cssText = 'all:unset; flex:1; background:#007AFF; color:white; padding:8px; border-radius:8px; text-align:center; cursor:pointer; font-size:12px; font-weight:700';
+        dlBtn.onclick = () => {
+            console.log('[DoulGet] 🖱️ Download button clicked for:', cleanName, '| URL:', url.substring(0, 80));
+            dlBtn.textContent = 'Envoi...';
+            dlBtn.style.opacity = '0.6';
+            
+            // Check if chrome runtime is still valid
+            if (!isContextValid()) {
+                console.warn('[DoulGet] ⚠️ Chrome runtime context lost! Using direct fallback...');
+                // Direct fallback: send to DoulGet app via fetch
+                fetch('http://localhost:8765/download-detected', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        url: downloadUrl,
-                        filename: filename,
-                        headers: {
-                            'User-Agent': navigator.userAgent,
-                            'Referer': location.href
-                        }
+                        type: 'download-detected',
+                        url: url,
+                        filename: cleanName,
+                        mimeType: 'video/mp4',
+                        headers: { 'Referer': location.href, 'User-Agent': navigator.userAgent },
+                        timestamp: Date.now()
                     })
+                }).then(r => r.json()).then(res => {
+                    console.log('[DoulGet] ✅ Direct fallback success:', res);
+                    bar.remove();
+                }).catch(err => {
+                    console.error('[DoulGet] ❌ Direct fallback failed:', err);
+                    dlBtn.textContent = '❌ Échec - App fermée?';
+                    dlBtn.style.background = '#FF3B30';
+                    dlBtn.style.opacity = '1';
                 });
-
-                btn.innerHTML = ' ✅';
-                btn.style.color = '#28a745';
-                console.log('✅ Download request sent to DoulBrowser');
-
-                setTimeout(() => {
-                    btn.innerHTML = ' ⬇️';
-                    btn.style.color = '';
-                }, 2000);
-            } catch (error) {
-                console.error('❌ Failed to send download request:', error);
-                btn.innerHTML = ' ❌';
-                btn.style.color = '#dc3545';
-
-                setTimeout(() => {
-                    btn.innerHTML = ' ⬇️';
-                    btn.style.color = '';
-                }, 2000);
+                return;
+            }
+            
+            try {
+                chrome.runtime.sendMessage({ 
+                    action: 'sendDownload', 
+                    url: url, 
+                    filename: cleanName, 
+                    headers: { 'Referer': location.href } 
+                }, (res) => { 
+                    if (chrome.runtime.lastError) {
+                        console.error('[DoulGet] ❌ sendMessage error:', chrome.runtime.lastError.message);
+                        dlBtn.textContent = '❌ Erreur extension';
+                        dlBtn.style.background = '#FF3B30';
+                        dlBtn.style.opacity = '1';
+                        // Try direct fallback
+                        fetch('http://localhost:8765/download-detected', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                type: 'download-detected',
+                                url: url,
+                                filename: cleanName,
+                                mimeType: 'video/mp4',
+                                headers: { 'Referer': location.href, 'User-Agent': navigator.userAgent },
+                                timestamp: Date.now()
+                            })
+                        }).then(r => r.json()).then(fbRes => {
+                            console.log('[DoulGet] ✅ Fallback after error success:', fbRes);
+                            bar.remove();
+                        }).catch(() => {});
+                        return;
+                    }
+                    console.log('[DoulGet] ✅ sendMessage response:', res);
+                    if (res?.success) bar.remove(); 
+                    else {
+                        dlBtn.textContent = 'Réessayer';
+                        dlBtn.style.opacity = '1';
+                    }
+                });
+            } catch(e) {
+                console.error('[DoulGet] ❌ Exception during sendMessage:', e);
+                dlBtn.textContent = '❌ Erreur';
+                dlBtn.style.background = '#FF3B30';
+                dlBtn.style.opacity = '1';
             }
         };
+        
+        const closeBtn = header.querySelector('#doul-close-bar');
+        closeBtn.onclick = () => bar.remove();
 
-        // Insert button after the link
-        link.parentNode.insertBefore(btn, link.nextSibling);
-        console.log('✅ Download button attached to link:', link.href.substring(0, 60));
+        bar.appendChild(header); bar.appendChild(body); bar.appendChild(epWrapper); bar.appendChild(dlBtn);
+        document.body.appendChild(bar);
+        currentFloatingCapture = bar;
+        setTimeout(() => { if (bar.parentNode) bar.remove(); }, 20000);
     }
 
-    // Run overlay check periodically
-    setupVideoOverlays(); // Initial run
-    setInterval(setupVideoOverlays, 2000); // Check every 2 seconds
+    setupVideoOverlays();
+    setInterval(() => { if (isContextValid()) { setupVideoOverlays(); if (window === window.top) { const meta = getSeriesMetadataFromDOM(); if (meta) chrome.runtime.sendMessage({ action: 'reportMetadata', metadata: meta, title: getCleanTitle().replace(meta, '').trim() }); } } }, 3000);
 
-    console.log('✅ DoulBrowser overlay system initialized');
+    if (window.location.href.toLowerCase().endsWith('.pdf')) { setTimeout(() => showFloatingCapture(window.location.href, document.title || 'Fichier PDF'), 1500); }
+
+    // [v1.9.9.1] FileCR /file-download/ special handler
+    // Broaden detection: FileCR URLs can contain "download", "/dl/", etc.
+    const isFileCR = location.href.includes('filecr.com');
+    const isFileCRDownloadPage = isFileCR && (location.href.includes('download') || location.href.includes('/dl/'));
+
+    if (isFileCRDownloadPage) {
+        let fileCRHandled = false;
+
+        function findFileCRDownloadLink() {
+            if (fileCRHandled) return;
+
+            // Try broad selectors for FileCR's dynamic download button/link
+            const selectors = [
+                'a[href*="/dl/"]',
+                'a[href*="download"]',
+                '.download-btn',
+                '.btn-download',
+                'a.btn-download',
+                'a.download-btn',
+                'a[class*="download"]',
+                'a[id*="download"]',
+                '.download-area a[href]',
+                '.btn-group a[href]',
+                '.countdown-complete a[href]',
+                '#download-link',
+                '#download-btn',
+                'a[rel="nofollow"][href]',
+                '#dl_button',
+                '.dl-link',
+                '.final-download'
+            ];
+
+            for (const sel of selectors) {
+                const links = document.querySelectorAll(sel);
+                for (const link of links) {
+                    const href = link.href || '';
+                    if (!href || href.includes('filecr.com/') && !href.includes('/dl/') && !href.includes('download')) continue;
+                    if (link.hasAttribute('data-doul-attached')) continue;
+                    if (link.textContent.trim().toLowerCase().includes('ad') || link.textContent.trim().toLowerCase().includes('torrent')) continue;
+
+                    // Found a real download link — show DoulGet capture bar
+                    const fname = document.title.replace(' - FileCR', '').trim() || 'download';
+                    console.log('[DoulGet FileCR] 🎯 Found download link:', href.substring(0, 80));
+                    link.setAttribute('data-doul-attached', 'true');
+                    fileCRHandled = true;
+
+                    // Show floating capture bar
+                    if (!document.getElementById('doulget-capture-bar')) {
+                        if (window === window.top) {
+                            showFloatingCapture(href, fname, {});
+                        } else {
+                            // In iframe: Notify top frame to show capture bar
+                            chrome.runtime.sendMessage({ action: 'sendDownload', url: href, filename: fname, silent: true }, () => {
+                                chrome.runtime.sendMessage({ action: 'requestShowBar', url: href, filename: fname });
+                            });
+                        }
+                    }
+                    break;
+                }
+                if (fileCRHandled) break;
+            }
+
+            // Also check buttons with download text
+            if (!fileCRHandled) {
+                document.querySelectorAll('button, a').forEach(el => {
+                    if (fileCRHandled || el.hasAttribute('data-doul-attached')) return;
+                    const text = el.textContent.trim().toLowerCase();
+                    if ((text.includes('download') && !text.includes('torrent') && !text.includes('ad')) && el.href && el.href.startsWith('http') && !el.href.includes('filecr.com/file-download')) {
+                        const fname = document.title.replace(' - FileCR', '').trim() || 'download';
+                        console.log('[DoulGet FileCR] 🎯 Found download button:', el.href.substring(0, 80));
+                        el.setAttribute('data-doul-attached', 'true');
+                        fileCRHandled = true;
+                        if (!document.getElementById('doulget-capture-bar')) {
+                            showFloatingCapture(el.href, fname, {});
+                        }
+                    }
+                });
+            }
+        }
+
+        // Start scanning: poll every 500ms for up to 30s (countdown can take ~10-15s)
+        console.log('[DoulGet FileCR] 🔍 Watching for download link...');
+        const fileCRInterval = setInterval(() => {
+            if (!isContextValid()) { clearInterval(fileCRInterval); return; }
+            findFileCRDownloadLink();
+            if (fileCRHandled) clearInterval(fileCRInterval);
+        }, 500);
+        setTimeout(() => clearInterval(fileCRInterval), 30000);
+    }
+
+    console.log('✅ DoulGet engine restored (v1.9.9)');
 })();

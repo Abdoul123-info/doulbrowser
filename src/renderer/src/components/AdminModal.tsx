@@ -1,4 +1,4 @@
-import { X, ShieldAlert, ShieldCheck, Key, FileText, Clipboard, CheckCircle2, AlertCircle, Cloud, RefreshCw, UploadCloud, Package, Search, Star, MessageSquare } from 'lucide-react';
+import { X, ShieldAlert, ShieldCheck, Key, FileText, Clipboard, CheckCircle2, AlertCircle, Cloud, RefreshCw, UploadCloud, Package, Search, Star, MessageSquare, AlertTriangle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useTranslation } from '../utils/i18n';
 
@@ -23,12 +23,28 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     const [activeTab, setActiveTab] = useState<'generation' | 'cloud' | 'updates' | 'feedback'>('generation');
     const [newVersion, setNewVersion] = useState('');
     const [newUpdateUrl, setNewUpdateUrl] = useState('');
+    const [newExtensionVersion, setNewExtensionVersion] = useState('');
+    const [newExtensionUrl, setNewExtensionUrl] = useState('');
     const [cloudLicenses, setCloudLicenses] = useState<any[]>([]);
     const [isLoadingCloud, setIsLoadingCloud] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const [searchCloud, setSearchCloud] = useState('');
     const [feedbackList, setFeedbackList] = useState<any[]>([]);
     const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
+
+    const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; message: string; onConfirm: () => void }>({
+        open: false,
+        message: '',
+        onConfirm: () => {}
+    });
+
+    const showConfirm = (message: string, onConfirm: () => void) => {
+        setConfirmDialog({ open: true, message, onConfirm });
+    };
+
+    const closeConfirm = () => {
+        setConfirmDialog(prev => ({ ...prev, open: false }));
+    };
 
 
     const handleAuth = async () => {
@@ -68,11 +84,8 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
 
 
     const handleGenerateSingle = async () => {
-        if (!targetMid.trim()) {
-            setMessage({ type: 'error', text: 'Veuillez entrer un ID Machine.' });
-            return;
-        }
-
+        // HWID optionnel : s'il est vide, le backend génère une clé universelle "B-XXXX"
+        // utilisable sur n'importe quelle machine (verrouillée au premier usage).
         try {
             const finalDuration = duration === 'custom' ? `date:${customDate}` : duration;
             if (duration === 'custom' && !customDate) {
@@ -136,28 +149,38 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     };
 
     const handleResetLicense = async () => {
-        if (!window.confirm(t.admin.confirmReset)) return;
-
-        try {
-            const res = await window.api.adminResetLicense(password);
-            if (res.success) {
-                setMessage({ type: 'success', text: 'Licence réinitialisée ! Redémarrez DoulGet pour activer une nouvelle clé.' });
-            } else {
-                setMessage({ type: 'error', text: res.error || 'Erreur lors de la réinitialisation.' });
+        showConfirm(
+            t.admin.confirmReset || 'Voulez-vous réinitialiser la licence de ce PC ?',
+            async () => {
+                try {
+                    const res = await window.api.adminResetLicense(password);
+                    if (res.success) {
+                        setMessage({ type: 'success', text: 'Licence réinitialisée ! Redémarrez DoulGet pour activer une nouvelle clé.' });
+                    } else {
+                        setMessage({ type: 'error', text: res.error || 'Erreur lors de la réinitialisation.' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Erreur technique.' });
+                }
             }
-        } catch (error) {
-            setMessage({ type: 'error', text: 'Erreur technique.' });
-        }
+        );
     };
 
     const handlePushUpdate = async () => {
-        if (!newVersion || !newUpdateUrl) {
-            setMessage({ type: 'error', text: 'Veuillez remplir tous les champs.' });
+        if (!newVersion && !newExtensionVersion) {
+            setMessage({ type: 'error', text: 'Veuillez au moins remplir une version (Setup ou Extension).' });
             return;
         }
 
         try {
-            const res = await window.api.adminSetLatestVersion(password, newVersion, newUpdateUrl);
+            const res = await window.api.adminSetLatestVersion(
+                password, 
+                newVersion, 
+                newUpdateUrl,
+                newExtensionVersion,
+                newExtensionUrl
+            );
+            
             if (res.success) {
                 setMessage({ type: 'success', text: 'Mise à jour publiée avec succès !' });
             } else {
@@ -175,8 +198,12 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
         try {
             const res = await window.api.adminUploadUpdateFile(password, localPath, type);
             if (res.success && res.url) {
-                if (type === 'setup') setNewUpdateUrl(res.url);
-                setMessage({ type: 'success', text: `${fileName} téléversé et configuré !` });
+                if (type === 'setup') {
+                    setNewUpdateUrl(res.url);
+                } else {
+                    setNewExtensionUrl(res.url);
+                }
+                setMessage({ type: 'success', text: `${fileName} téléversé, hash SHA-256 publié et configuré !` });
             } else {
                 setMessage({ type: 'error', text: res.error || 'Erreur lors de l\'upload.' });
             }
@@ -203,19 +230,22 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     };
 
     const handleDeleteLicenseCloud = async (mid: string) => {
-        if (!window.confirm(`${t.admin.confirmDelete} (${mid})`)) return;
-
-        try {
-            const res = await window.api.adminDeleteLicenseCloud(password, mid);
-            if (res.success) {
-                setMessage({ type: 'success', text: 'Client supprimé totalement.' });
-                fetchCloudLicenses(); // Refresh
-            } else {
-                setMessage({ type: 'error', text: res.error || 'Erreur lors de la suppression.' });
+        showConfirm(
+            `${t.admin.confirmDelete || 'Voulez-vous supprimer cet élément ?'} (${mid})`,
+            async () => {
+                try {
+                    const res = await window.api.adminDeleteLicenseCloud(password, mid);
+                    if (res.success) {
+                        setMessage({ type: 'success', text: 'Client supprimé totalement.' });
+                        fetchCloudLicenses(); // Refresh
+                    } else {
+                        setMessage({ type: 'error', text: res.error || 'Erreur lors de la suppression.' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Erreur technique.' });
+                }
             }
-        } catch (error) {
-            setMessage({ type: 'error', text: 'Erreur technique.' });
-        }
+        );
     };
 
     const triggerFileSelect = async (type: 'setup' | 'extension') => {
@@ -605,39 +635,66 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                     </div>
 
                                     <div className="space-y-4 pt-2">
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-bold text-blue-300 uppercase">{t.admin.versionNumber}</label>
-                                            <input
-                                                type="text"
-                                                value={newVersion}
-                                                onChange={(e) => setNewVersion(e.target.value)}
-                                                placeholder="v1.2.9"
-                                                className="w-full px-3 py-2 bg-black/40 text-blue-100 border border-blue-500/20 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
-                                            />
-                                        </div>
+                                        
+                                        <div className="grid grid-cols-2 gap-4">
+                                            {/* SETUP Mises à jour */}
+                                            <div className="space-y-2 p-3 bg-black/20 rounded-lg border border-blue-500/10">
+                                                <h5 className="text-[10px] font-bold text-blue-300 uppercase mb-2 border-b border-blue-500/20 pb-1">Logiciel PC (Setup)</h5>
+                                                
+                                                <label className="text-[9px] text-blue-300/70 uppercase">Version (ex: v2.0.0)</label>
+                                                <input
+                                                    type="text"
+                                                    value={newVersion}
+                                                    onChange={(e) => setNewVersion(e.target.value)}
+                                                    placeholder="v2.0.0"
+                                                    className="w-full px-3 py-2 bg-black/40 text-blue-100 border border-blue-500/20 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none mb-2"
+                                                />
 
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-bold text-blue-300 uppercase">{t.admin.directLink}</label>
-                                            <input
-                                                type="text"
-                                                value={newUpdateUrl}
-                                                onChange={(e) => setNewUpdateUrl(e.target.value)}
-                                                placeholder="Généré automatiquement après upload..."
-                                                className="w-full px-3 py-2 bg-black/40 text-blue-100 border border-blue-500/20 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
-                                            />
+                                                <label className="text-[9px] text-blue-300/70 uppercase">Lien Direct (.exe)</label>
+                                                <input
+                                                    type="text"
+                                                    value={newUpdateUrl}
+                                                    onChange={(e) => setNewUpdateUrl(e.target.value)}
+                                                    placeholder="Lien auto..."
+                                                    className="w-full px-3 py-2 bg-black/40 text-blue-100 border border-blue-500/20 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                                                />
+                                            </div>
+
+                                            {/* EXTENSION Mises à jour */}
+                                            <div className="space-y-2 p-3 bg-black/20 rounded-lg border border-indigo-500/10">
+                                                <h5 className="text-[10px] font-bold text-indigo-300 uppercase mb-2 border-b border-indigo-500/20 pb-1">Extension Chrome (.zip)</h5>
+                                                
+                                                <label className="text-[9px] text-indigo-300/70 uppercase">Version (ex: v1.9.5)</label>
+                                                <input
+                                                    type="text"
+                                                    value={newExtensionVersion}
+                                                    onChange={(e) => setNewExtensionVersion(e.target.value)}
+                                                    placeholder="v1.9.5"
+                                                    className="w-full px-3 py-2 bg-black/40 text-indigo-100 border border-indigo-500/20 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none mb-2"
+                                                />
+
+                                                <label className="text-[9px] text-indigo-300/70 uppercase">Lien Direct (.zip)</label>
+                                                <input
+                                                    type="text"
+                                                    value={newExtensionUrl}
+                                                    onChange={(e) => setNewExtensionUrl(e.target.value)}
+                                                    placeholder="Lien auto..."
+                                                    className="w-full px-3 py-2 bg-black/40 text-indigo-100 border border-indigo-500/20 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                                                />
+                                            </div>
                                         </div>
 
                                         <button
                                             onClick={handlePushUpdate}
                                             disabled={isUploading}
-                                            className={`w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all shadow-lg text-xs ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            className={`w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all shadow-lg text-xs mt-2 ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         >
                                             {isUploading ? t.admin.uploading : t.admin.publishUpdate}
                                         </button>
                                     </div>
 
                                     <p className="mt-4 text-[10px] text-blue-300/50 italic text-center">
-                                        {t.admin.publishNote}
+                                        Remplissez la version du Logiciel ou de l'Extension (ou les deux) puis cliquez sur Publier.
                                     </p>
                                 </div>
                             </div>
@@ -731,6 +788,38 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                         </div>
                     </div>
                 )}
+                <ConfirmDialog state={confirmDialog} onClose={closeConfirm} />
+            </div>
+        </div>
+    );
+}
+
+function ConfirmDialog({ state, onClose }: { state: { open: boolean; message: string; onConfirm: () => void }, onClose: () => void }) {
+    if (!state.open) return null;
+    return (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center animate-in fade-in duration-200">
+            <div className="absolute inset-0 bg-black/65 backdrop-blur-[2px]" onClick={onClose} />
+            <div className="relative bg-[#0f172a] border border-blue-500/30 rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4 flex flex-col gap-4 animate-in zoom-in-95 duration-150">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-red-500/15 flex items-center justify-center shrink-0">
+                        <AlertTriangle className="w-5 h-5 text-red-500" />
+                    </div>
+                    <p className="text-sm text-blue-100 leading-relaxed">{state.message}</p>
+                </div>
+                <div className="flex justify-end gap-2">
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-2 rounded-lg text-sm bg-slate-800 hover:bg-slate-700 text-blue-200 transition-colors"
+                    >
+                        Annuler
+                    </button>
+                    <button
+                        onClick={() => { state.onConfirm(); onClose(); }}
+                        className="px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white font-medium transition-colors"
+                    >
+                        Confirmer
+                    </button>
+                </div>
             </div>
         </div>
     );

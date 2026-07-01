@@ -3,9 +3,9 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "==============================================" -ForegroundColor Blue
-Write-Host "--- DOULGET BUILD SECURE (v1.8.0) ---" -ForegroundColor Cyan
-Write-Host "==============================================" -ForegroundColor Blue
+Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host "--- DOULGET BUILD SECURE (v1.9.3) ---" -ForegroundColor Cyan
+Write-Host "==============================================" -ForegroundColor Cyan
 
 # 1. Nettoyage
 Write-Host "`n[1/4] Nettoyage des fichiers temporaires..." -ForegroundColor Yellow

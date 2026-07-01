@@ -23,6 +23,9 @@ const api = {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings: any) => ipcRenderer.invoke('save-settings', settings),
   getDownloadLogs: (url: string) => ipcRenderer.invoke('get-download-logs', url),
+  getAppLogPath: () => ipcRenderer.invoke('get-app-log-path'),
+  readAppLog: (maxLines?: number) => ipcRenderer.invoke('read-app-log', maxLines),
+  openAppLogFolder: () => ipcRenderer.invoke('open-app-log-folder'),
   deleteFile: (path: string, filename?: string) => ipcRenderer.invoke('delete-file', path, filename),
   // [v1.6.9] Licensing APIs
   getLicenseStatus: () => ipcRenderer.invoke('get-license-status'),
@@ -37,7 +40,7 @@ const api = {
   adminSelectUpdateFile: (type: 'setup' | 'extension') => ipcRenderer.invoke('admin-select-update-file', type),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
-  adminSetLatestVersion: (password, newVersion, downloadUrl) => ipcRenderer.invoke('admin-set-latest-version', password, newVersion, downloadUrl),
+  adminSetLatestVersion: (password, newVersion, downloadUrl, extensionVersion, extensionUrl, updateHash, extensionHash) => ipcRenderer.invoke('admin-set-latest-version', password, newVersion, downloadUrl, extensionVersion, extensionUrl, updateHash, extensionHash),
   verifyAdminPassword: (password: string) => ipcRenderer.invoke('verify-admin-password', password),
   pingLicense: () => ipcRenderer.invoke('ping-license'),
   adminDeleteLicenseCloud: (password: string, targetMid: string) => ipcRenderer.invoke('admin-delete-license-cloud', password, targetMid),
@@ -57,12 +60,15 @@ const api = {
   adminGetFeedback: (password: string) => ipcRenderer.invoke('admin-get-feedback', password),
   getFeedbackStatus: () => ipcRenderer.invoke('get-feedback-status'),
   // [v1.6.0] Auto-Update APIs 🚀
-  startAppUpdate: (downloadUrl: string) => ipcRenderer.invoke('start-app-update', downloadUrl),
+  startAppUpdate: (downloadUrl: string, expectedHash: string) => ipcRenderer.invoke('start-app-update', downloadUrl, expectedHash),
   installAppUpdate: () => ipcRenderer.invoke('install-app-update'),
-  onUpdateProgress: (callback: (event: any, progress: number) => void) => ipcRenderer.on('update-progress', callback),
-  onUpdateReady: (callback: (event: any) => void) => ipcRenderer.on('update-ready', callback),
-  onUpdateError: (callback: (event: any, error: string) => void) => ipcRenderer.on('update-error', callback),
-  onExternalBatch: (callback: (event: any, data: any) => void) => ipcRenderer.on('external-batch', callback),
+  onUpdateProgress: (callback) => ipcRenderer.on('update-progress', callback),
+  onUpdateReady: (callback) => ipcRenderer.on('update-ready', callback),
+  onUpdateError: (callback) => ipcRenderer.on('update-error', callback),
+  onExternalBatch: (callback) => ipcRenderer.on('external-batch', callback),
+  installExtensionUpdate: (url: string, expectedHash: string) => ipcRenderer.invoke('install-extension-update', url, expectedHash),
+  getExtensionVersion: () => ipcRenderer.invoke('get-extension-version'),
+  registerExtensionInBrowsers: () => ipcRenderer.invoke('register-extension-in-browsers'),
   removeDownloadListeners: () => {
     ipcRenderer.removeAllListeners('download-progress');
     ipcRenderer.removeAllListeners('download-started');

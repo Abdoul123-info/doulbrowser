@@ -19,7 +19,7 @@ export function Sidebar({ activeFilter, onFilterChange, onSettingsClick, onAbout
     const { t } = useTranslation();
     const [logoClicks, setLogoClicks] = useState(0);
     const [version, setVersion] = useState('...');
-    const [updateInfo, setUpdateInfo] = useState<{ available: boolean, url?: string, dismissed?: boolean } | null>(null);
+    const [updateInfo, setUpdateInfo] = useState<{ available: boolean, url?: string, hash?: string, dismissed?: boolean } | null>(null);
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'downloading' | 'ready' | 'error'>('idle');
     const [updateProgress, setUpdateProgress] = useState(0);
 
@@ -54,7 +54,7 @@ export function Sidebar({ activeFilter, onFilterChange, onSettingsClick, onAbout
         try {
             const res = await window.api.checkAppUpdate();
             if (res.updateAvailable) {
-                setUpdateInfo({ available: true, url: res.downloadUrl });
+                setUpdateInfo({ available: true, url: res.downloadUrl, hash: res.updateHash });
             }
         } catch (e) {
             console.warn('[Update] Check failed:', e);
@@ -62,10 +62,10 @@ export function Sidebar({ activeFilter, onFilterChange, onSettingsClick, onAbout
     };
 
     const handleStartUpdate = async () => {
-        if (!updateInfo?.url) return;
+        if (!updateInfo?.url || !updateInfo?.hash) return;
         setUpdateStatus('downloading');
         setUpdateProgress(0);
-        await window.api.startAppUpdate(updateInfo.url);
+        await window.api.startAppUpdate(updateInfo.url, updateInfo.hash);
     };
 
     const handleInstallUpdate = async () => {

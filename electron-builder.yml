@@ -14,13 +14,13 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - 'yt-dlp.exe'
   - 'resources/**/*'
-  - 'extension_clean/**/*'
+  - 'Extension_DoulGet/**/*'
   - 'ffmpeg.exe'
 asarUnpack:
   - resources/**
   - yt-dlp.exe
   - ffmpeg.exe
-  - extension_clean/**
+  - Extension_DoulGet/**
 win:
   executableName: DoulGet
   icon: build/icon.ico

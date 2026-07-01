@@ -1,4 +1,4 @@
-import { X, Copy, RefreshCw } from 'lucide-react';
+import { X, Copy, RefreshCw, FolderOpen } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
 
 interface LogModalProps {
@@ -10,6 +10,7 @@ interface LogModalProps {
 
 export function LogModal({ isOpen, onClose, url, filename }: LogModalProps) {
     const [logs, setLogs] = useState<string[]>([]);
+    const [logPath, setLogPath] = useState('');
     const [isCopying, setIsCopying] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -18,6 +19,7 @@ export function LogModal({ isOpen, onClose, url, filename }: LogModalProps) {
         try {
             const data = await window.api.getDownloadLogs(url);
             setLogs(data);
+            setLogPath(await window.api.getAppLogPath());
         } catch (error) {
             console.error('Failed to fetch logs:', error);
         }
@@ -57,7 +59,7 @@ export function LogModal({ isOpen, onClose, url, filename }: LogModalProps) {
                             Technical Logs
                         </h3>
                         <span className="text-xs text-muted-foreground truncate max-w-[400px]">
-                            {filename}
+                            {logPath || filename}
                         </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -67,6 +69,13 @@ export function LogModal({ isOpen, onClose, url, filename }: LogModalProps) {
                             title="Refresh"
                         >
                             <RefreshCw className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={() => window.api.openAppLogFolder()}
+                            className="p-2 hover:bg-secondary rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+                            title="Open log folder"
+                        >
+                            <FolderOpen className="w-4 h-4" />
                         </button>
                         <button
                             onClick={handleCopy}

@@ -2,7 +2,7 @@
 # Uploade automatiquement le .exe vers GitHub Releases via l'API REST
 
 param (
-    [string]$Version = "1.7.5",
+    [string]$Version = "1.9.0",
     [string]$Token = "", # Remplacez par votre token GitHub (GHP_...)
     [string]$Repo = "Abdoul123-info/doulbrowser"
 )
@@ -28,14 +28,9 @@ Write-Host "Tag v$Version créé." -ForegroundColor Green
 
 # Étape 2 : Créer le Release GitHub
 Write-Host "`n[2/3] Création du Release GitHub..." -ForegroundColor Yellow
-$RELEASE_VERSION = "1.8.0"
-$RELEASE_NAME = "DoulGet v1.8.0 - Background Tasks & Parallelism"
-$RELEASE_BODY = @"
-### Nouvelles Fonctionnalités :
-- **Background Tasks 🛠️** : Vous pouvez maintenant réduire les outils (Convertisseur MP3, Compresseur) en arrière-plan et continuer à utiliser l'application.
-- **Support des Redirections 🔄** : Correction du bug de mise à jour (0%) en gérant les redirections sécurisées de GitHub.
-- **Version Dynamique** : Correction de l'affichage de la version dans la fenêtre "À propos".
-"@
+$RELEASE_VERSION = "v$Version"
+$RELEASE_NAME = "DoulGet v$Version - Batch Fix & Noise Filter"
+$RELEASE_BODY = "v1.9.0: Fixed SRT interference in batch downloads and filtered out noise (usernames, subtitles count) from episode list."
 $ReleaseBody = @{
     tag_name   = "v$Version"
     name       = "$RELEASE_NAME"

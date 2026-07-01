@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import CryptoJS from "https://esm.sh/crypto-js@4.1.1"
 
 // --- CONFIGURATION ---
-const LICENSE_SALT = 'DadiLicenceSecret2026'
+const LICENSE_SALT = Deno.env.get('LICENSE_SALT') || ''
 const SUPABASE_URL = Deno.env.get('APP_URL') || ''
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('APP_SERVICE_KEY') || ''
 
@@ -32,7 +32,7 @@ serve(async (req) => {
     
     console.log(`[Webhook] Force Duration: ${duration}, Email: ${email}`)
 
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !LICENSE_SALT) {
        throw new Error('Server configuration error (Keys missing in Supabase Settings)')
     }
 

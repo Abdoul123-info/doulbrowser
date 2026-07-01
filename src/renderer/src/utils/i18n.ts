@@ -312,6 +312,24 @@ export interface Translations {
     feature11: string;
     feature12: string;
   };
+  extensionUpdate: {
+    title: string;
+    available: string;
+    installBtn: string;
+    installing: string;
+    ready: string;
+    error: string;
+    success: string;
+  };
+  autoInstall: {
+    title: string;
+    description: string;
+    button: string;
+    installing: string;
+    success: string;
+    error: string;
+    chromeNote: string;
+  };
 }
 
 const translations: Record<Language, Translations> = {
@@ -484,7 +502,7 @@ const translations: Record<Language, Translations> = {
       lifetime: 'À Vie (Pack Illimité)',
       customDate: 'Date Personnalisée...',
       singleKey: 'Clé Unique',
-      hwidClient: 'HWID Client',
+      hwidClient: 'HWID Client (optionnel)',
       generate: 'GÉNÉRER',
       bulkGeneration: 'Génération en Masse',
       count: 'Nombre :',
@@ -608,6 +626,24 @@ const translations: Record<Language, Translations> = {
       feature10: 'Mise à jour automatique',
       feature11: 'Système d\'avis et commentaires',
       feature12: 'Support multilingue (Français / Anglais)',
+    },
+    extensionUpdate: {
+      title: 'Mise à jour Extension',
+      available: 'Une nouvelle version de l\'extension (v{v}) est disponible.',
+      installBtn: 'Installer maintenant',
+      installing: 'Installation en cours...',
+      ready: '✅ Mise à jour installée avec succès !',
+      error: '❌ Échec de l\'installation. Réessayez.',
+      success: 'L\'extension a été mise à jour.',
+    },
+    autoInstall: {
+      title: 'Installation Navigateurs',
+      description: 'DoulGet peut configurer automatiquement l\'extension dans vos navigateurs.',
+      button: 'INSTALLER L\'EXTENSION',
+      installing: 'Configuration du registre...',
+      success: '✅ Extension enregistrée !',
+      error: '❌ Échec de l\'enregistrement.',
+      chromeNote: 'Note: Redémarrez Chrome pour voir le message d\'activation.',
     },
   },
   en: {
@@ -779,7 +815,7 @@ const translations: Record<Language, Translations> = {
       lifetime: 'Lifetime (Unlimited)',
       customDate: 'Custom Date...',
       singleKey: 'Single Key',
-      hwidClient: 'Client HWID',
+      hwidClient: 'Client HWID (optional)',
       generate: 'GENERATE',
       bulkGeneration: 'Bulk Generation',
       count: 'Count:',
@@ -903,6 +939,24 @@ const translations: Record<Language, Translations> = {
       feature10: 'Automatic updates',
       feature11: 'Feedback and review system',
       feature12: 'Multilingual support (French / English)',
+    },
+    extensionUpdate: {
+      title: 'Extension Update',
+      available: 'A new version of the extension (v{v}) is available.',
+      installBtn: 'Install now',
+      installing: 'Installing...',
+      ready: '✅ Update installed successfully!',
+      error: '❌ Installation failed. Try again.',
+      success: 'Extension has been updated.',
+    },
+    autoInstall: {
+      title: 'Browser Installation',
+      description: 'DoulGet can automatically configure the extension in your browsers.',
+      button: 'INSTALL EXTENSION',
+      installing: 'Setting up registry...',
+      success: '✅ Extension registered!',
+      error: '❌ Registration failed.',
+      chromeNote: 'Note: Restart Chrome to see the activation message.',
     },
   },
 };

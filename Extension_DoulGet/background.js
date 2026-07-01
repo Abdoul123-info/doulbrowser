@@ -11,6 +11,14 @@ const requestHeadersCache = new Map();
 // [v1.9.27] NEW: Tab-based Metadata Store (Season/Episode context)
 const tabMetadata = new Map(); // { tabId: { metadata: "S02E05", title: "...", timestamp } }
 
+// [v1.9.3] Update Check Configuration
+const CURRENT_VERSION = '1.9.9';
+const SUPABASE_UPDATER = {
+    // [v1.9.36] Query for both extension_version and extension_url
+    url: 'https://gqrwykhhqjimsgiqkgut.supabase.co/rest/v1/app_config?key=in.(extension_version,extension_url)',
+    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdxcnd5a2hocWppbXNnaXFrZ3V0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE3MTIyNzAsImV4cCI6MjA4NzI4ODI3MH0.OVLEQdhYN6VHi5OQC_51EnDPoPPbnV0HuNHtchPy244'
+};
+
 // [v1.3.6] GLOBAL URL BLACKLIST — checked at the SINGLE chokepoint before reaching Electron
 const BLOCKED_DOMAINS = [
     'mail.google.com', 'gmail.com', 'inbox.google.com',
@@ -68,11 +76,12 @@ function sendToDoulGet(data) {
         if (response.ok) {
             console.log('✅ Sent to DoulGet:', data.url.substring(0, 50) + '...');
         }
-    }).catch(() => { });
+    }).catch(err => { console.error('❌ Failed to send to DoulGet app:', err.message || err); });
 }
 
 function sendBatchToDoulGet(batchData) {
-    console.log('📦 Sending BATCH to DoulGet:', batchData.playlistTitle, `(${batchData.items.length} items)`);
+    console.log('📦 [DoulGet] Attempting to send BATCH to DoulGet:', batchData.playlistTitle, `(${batchData.items.length} items)`);
+    console.log('📦 [DoulGet] Batch payload:', JSON.stringify(batchData).substring(0, 500) + '...');
     fetch(`http://${DOULGET_HOST}:${DOULGET_PORT}/batch-download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -197,13 +206,20 @@ chrome.webRequest.onHeadersReceived.addListener(
         console.log('📹 Video CDN Captured:', url.substring(0, 80));
 
         // Send to content script to map to video element
-        if (details.tabId >= 0) {
-            chrome.tabs.sendMessage(details.tabId, {
-                action: 'videoCaptured',
-                url: url,
-                headers: capturedHeaders
-            }).catch(() => { });
-        }
+        // [v1.9.7] Skip if batch mode is active (content script handles streams directly)
+        chrome.storage.local.get('batchMode', (data) => {
+            if (data.batchMode) {
+                console.log('[Batch Mode] Suppressing videoCaptured for:', url.substring(0, 50));
+                return;
+            }
+            if (details.tabId >= 0) {
+                chrome.tabs.sendMessage(details.tabId, {
+                    action: 'videoCaptured',
+                    url: url,
+                    headers: capturedHeaders
+                }).catch(() => { });
+            }
+        });
 
         // Cleanup old entries (>5 minutes)
         setTimeout(() => videoUrlCache.delete(url), 5 * 60 * 1000);
@@ -431,8 +447,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         if (meta && !isSocial && !tabTitle.includes(meta.metadata) && (Date.now() - meta.timestamp < 300000)) {
                              console.log('[Background] Merging cached metadata to tab title:', meta.metadata);
                              // Clean tab title of common junk but keep core series name
-                             tabTitle = tabTitle.replace(/Season\s?\d+|Saison\s?\d+|Episode\s?\d+|Ep\s?\d+/gi, '').replace(/\s+/g, ' ').trim();
-                             tabTitle = `${tabTitle} ${meta.metadata}`;
+                             tabTitle = tabTitle.replace(/Season\s?\d+|Saison\s?\d+|Episode\s?\d+|Ep\s?\d+|S\d+E\d+/gi, '').replace(/\s+/g, ' ').trim();
+                             tabTitle = `${tabTitle} - ${meta.metadata}`;
                         }
 
                         tabTitle = tabTitle
@@ -491,7 +507,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return true;
         }
 
+        if (request.action === 'requestShowBar' && sender.tab) {
+            chrome.tabs.sendMessage(sender.tab.id, {
+                action: 'requestShowBar',
+                url: request.url,
+                filename: request.filename
+            }).catch(() => {});
+            return true;
+        }
+
         if (request.action === 'sendBatchDownload') {
+            console.log('📥 [Background] Received sendBatchDownload message from content script:', request.playlistTitle);
             sendBatchToDoulGet({
                 playlistTitle: request.playlistTitle || 'Batch Download',
                 items: request.items || [],
@@ -596,8 +622,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         if (request.action === 'resolveLokLokStream') {
-            const { subjectId, detailPath, se, ep } = request;
-            const api = `https://lok-lok.cc/wefeed-h5api-bff/subject/play?subjectId=${subjectId}&se=${se}&ep=${ep}&detailPath=${detailPath}`;
+            const { subjectId, detailPath, se, ep, referer } = request;
+            const origin = referer ? new URL(referer).origin : 'https://lok-lok.cc';
+            const api = `${origin}/wefeed-h5api-bff/subject/play?subjectId=${subjectId}&se=${se}&ep=${ep}&detailPath=${detailPath}`;
             
             // [v1.4.5] Robust resolution with timeout to prevent message channel closure
             const controller = new AbortController();
@@ -608,15 +635,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 headers: {
                     'Accept': 'application/json, text/plain, */*',
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Referer': 'https://lok-lok.cc/',
-                    'Origin': 'https://lok-lok.cc'
+                    'Referer': origin + '/',
+                    'Origin': origin
                 }
             })
             .then(res => res.json())
             .then(data => {
                 clearTimeout(timeoutId);
                 if (data.streams && data.streams.length > 0) {
-                    sendResponse({ success: true, url: data.streams[0].url });
+                    // [v1.9.0] Filter out subtitles (.srt, .vtt) from stream resolution
+                    const videoStreams = data.streams.filter(s => {
+                        const lowUrl = (s.url || '').toLowerCase();
+                        return !lowUrl.includes('.srt') && !lowUrl.includes('.vtt');
+                    });
+                    
+                    if (videoStreams.length > 0) {
+                        sendResponse({ success: true, url: videoStreams[0].url });
+                    } else {
+                        // Fallback to first if all filtered (unlikely)
+                        sendResponse({ success: true, url: data.streams[0].url });
+                    }
                 } else {
                     sendResponse({ success: false, error: 'No streams found' });
                 }
@@ -643,4 +681,64 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 // 4. DOWNLOAD INTERCEPTION - Disabled in v1.9.1 (Unstable in Electron environment)
-console.log('🚀 DoulGet Background Worker Active (v1.2.0)');
+console.log('🚀 DoulGet Background Worker Active (v1.9.3)');
+
+// 5. UPDATE SYSTEM (v1.9.3)
+async function checkExtensionUpdate() {
+    try {
+        const response = await fetch(SUPABASE_UPDATER.url, {
+            headers: {
+                'apikey': SUPABASE_UPDATER.key,
+                'Authorization': `Bearer ${SUPABASE_UPDATER.key}`
+            }
+        });
+        const data = await response.json();
+        
+        if (data && Array.isArray(data) && data.length > 0) {
+            const versionRow = data.find(r => r.key === 'extension_version');
+            const urlRow = data.find(r => r.key === 'extension_url');
+
+            const latestVersion = versionRow ? versionRow.value : CURRENT_VERSION;
+            const extensionUrl = urlRow ? urlRow.value : '';
+
+            const isNewer = compareVersions(latestVersion, CURRENT_VERSION);
+            
+            if (isNewer) {
+                console.log(`[ExtensionUpdate] New version available: ${latestVersion} (Local: ${CURRENT_VERSION})`);
+                chrome.action.setBadgeText({ text: 'NEW' });
+                chrome.action.setBadgeBackgroundColor({ color: '#3b82f6' });
+                chrome.storage.local.set({ 
+                    updateAvailable: true, 
+                    latestVersion: latestVersion,
+                    updateUrl: extensionUrl, // [v1.9.4] The .zip direct link
+                    lastCheck: Date.now()
+                });
+            } else {
+                console.log('[ExtensionUpdate] Current version is up to date.');
+                chrome.action.setBadgeText({ text: '' });
+                chrome.storage.local.set({ updateAvailable: false });
+            }
+        }
+    } catch (err) {
+        console.error('Update check failed:', err);
+    }
+}
+
+function compareVersions(v1, v2) {
+    const p1 = v1.replace(/^v/, '').split('.').map(Number);
+    const p2 = v2.replace(/^v/, '').split('.').map(Number);
+    for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+        const n1 = p1[i] || 0;
+        const n2 = p2[i] || 0;
+        if (n1 > n2) return true;
+        if (n1 < n2) return false;
+    }
+    return false;
+}
+
+// Initial check and periodic polling (every 6 hours)
+checkExtensionUpdate();
+chrome.alarms.create('checkUpdate', { periodInMinutes: 360 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'checkUpdate') checkExtensionUpdate();
+});
