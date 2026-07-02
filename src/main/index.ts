@@ -62,8 +62,10 @@ function createWindow(): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      webSecurity: false, // CRITICAL: Disable web security to bypass CORS/CSP on TikTok
-      allowRunningInsecureContent: true,
+      // Sécurité: same-origin policy réactivée. Tout le réseau (extraction TikTok/
+      // YouTube, téléchargements) passe par le process principal via IPC (Node, sans
+      // CORS), donc le renderer n'a plus besoin de désactiver webSecurity.
+      webSecurity: true,
       contextIsolation: true,
       nodeIntegration: false,
       autoplayPolicy: 'no-user-gesture-required'
