@@ -34,6 +34,78 @@ export function getTrackerId(url: string, audioOnly: boolean): string {
   return `${url}|${audioOnly ? 'audio' : 'video'}`
 }
 
+// [Compat] TikTok sert souvent la vidéo en HEVC/H.265 (tag "hvc1"/"bytevc1" dans
+// l'URL CDN). VLC la lit, mais pas le lecteur Windows de base ni beaucoup d'apps.
+// Après un téléchargement direct, on sonde le codec avec ffprobe et on convertit
+// en H.264 (audio copié tel quel) pour une compatibilité universelle.
+async function convertHevcToH264IfNeeded(
+  filePath: string,
+  url: string,
+  win: BrowserWindow | null,
+  tracker?: DownloadTracker
+): Promise<void> {
+  const tmpOut = filePath.replace(/\.(mp4|mov|m4v)$/i, '.h264.mp4')
+  try {
+    if (!/tiktok|hvc1|bytevc1/i.test(url)) return
+    if (!/\.(mp4|mov|m4v)$/i.test(filePath) || !fs.existsSync(filePath)) return
+    const ffmpegPath = await ensureFfmpegAvailable(win || undefined)
+    if (!ffmpegPath) return
+    const ffprobePath = join(
+      dirname(ffmpegPath),
+      process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'
+    )
+
+    let codec = ''
+    if (fs.existsSync(ffprobePath)) {
+      try {
+        codec = execSync(
+          `"${ffprobePath}" -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "${filePath}"`,
+          { encoding: 'utf8', timeout: 15000 }
+        )
+          .trim()
+          .toLowerCase()
+      } catch {
+        return
+      }
+    } else if (/hvc1|bytevc1/i.test(url)) {
+      // Pas de ffprobe disponible : on se fie au tag codec de l'URL CDN.
+      codec = 'hevc'
+    }
+    if (codec !== 'hevc' && codec !== 'h265') return
+
+    console.log(`[Compat] HEVC détecté (${codec}) — conversion H.264 de: ${filePath}`)
+    if (tracker) {
+      tracker.statusMessage = 'Conversion H.264 (compatibilité)...'
+      safeSend(win, 'download-progress', {
+        url,
+        progress: 100,
+        state: 'downloading',
+        statusMessage: tracker.statusMessage
+      })
+    }
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(
+        ffmpegPath,
+        ['-y', '-i', filePath, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'copy', '-movflags', '+faststart', tmpOut],
+        { windowsHide: true }
+      )
+      proc.on('error', reject)
+      proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`))))
+    })
+    if (fs.existsSync(tmpOut) && fs.statSync(tmpOut).size > 0) {
+      fs.rmSync(filePath)
+      fs.renameSync(tmpOut, filePath)
+      console.log('[Compat] Conversion H.264 terminée, fichier remplacé.')
+    }
+  } catch (e) {
+    // Best effort : en cas d'échec on garde le fichier HEVC d'origine (lisible sur VLC).
+    console.error('[Compat] Conversion H.264 échouée, fichier HEVC conservé:', e)
+    try {
+      if (fs.existsSync(tmpOut)) fs.rmSync(tmpOut)
+    } catch {}
+  }
+}
+
 // [v1.8.6] Smart Series Metadata Extractor (SxxExx)
 export function extractSeriesMetadata(texts: string[]): string | null {
   const patterns = [
@@ -507,6 +579,11 @@ export async function downloadWithMultiThreading(url: string, savePath: string, 
     if (baseFilename === 'Generic' || baseFilename.includes('s2-download.xyz') || baseFilename === 's2-download.xyz') {
        baseFilename = fileInfo.filename || 'download.mp4'
     }
+    // [FIX] tracker.filename vient du titre de page de l'extension et peut contenir
+    // des caractères interdits sur Windows (ex: "|" dans les titres TikTok), ce qui
+    // faisait échouer la création du .part avec ENOENT. fileInfo.filename est déjà
+    // nettoyé, mais pas le nom fourni par le tracker.
+    baseFilename = sanitizeStringForFilename(baseFilename) || 'download.mp4'
 
     const partPath = join(tempDir, baseFilename + '.part')
     // [v2.3.6] Improved Resume Detection: Also check for .ytdl or .mp4.part in tempDir
@@ -1067,6 +1144,9 @@ export async function downloadWithMultiThreading(url: string, savePath: string, 
     } catch (renameErr) {
       console.error('[MultiThread] Failed to move from temp:', renameErr)
     }
+
+    // [Compat] TikTok HEVC -> H.264 pour lisibilité hors VLC
+    await convertHevcToH264IfNeeded(finalPath, url, win, trackerFinal)
 
     safeSend(win, 'download-complete', {
       filename: fileInfo.filename,
@@ -2050,19 +2130,30 @@ export async function downloadWithYtDlp(
           const cookies = effectiveHeaders['Cookie'].split(';').map((c) => c.trim())
           const expiration = Math.floor(Date.now() / 1000) + 86400 // 24h from now
 
+          // [FIX] Les cookies doivent être écrits sous le domaine de LA plateforme
+          // ciblée. Avant, ils étaient toujours étiquetés .youtube.com/.google.com,
+          // donc totalement inutilisables pour TikTok/Instagram (yt-dlp les ignorait).
+          let cookieDomains = [
+            '.youtube.com',
+            '.google.com',
+            '.googlevideo.com',
+            '.youtube-nocookie.com'
+          ]
+          if (url.includes('tiktok')) {
+            cookieDomains = ['.tiktok.com', '.tiktokv.com', '.tiktokcdn.com', '.tiktokcdn-us.com']
+          } else if (url.includes('instagram')) {
+            cookieDomains = ['.instagram.com', '.cdninstagram.com', '.fbcdn.net']
+          } else if (url.includes('facebook') || url.includes('fb.watch')) {
+            cookieDomains = ['.facebook.com', '.fbcdn.net']
+          } else if (url.includes('twitter') || url.includes('x.com')) {
+            cookieDomains = ['.twitter.com', '.x.com', '.twimg.com']
+          }
+
           for (const cookie of cookies) {
             const [name, ...valueParts] = cookie.split('=')
             const value = valueParts.join('=')
             if (name && value) {
-              // v1.2.6: Comprehensive YouTube/Google domains for authentication
-              const domains = [
-                '.youtube.com',
-                '.google.com',
-                '.googlevideo.com',
-                '.youtube-nocookie.com'
-              ]
-
-              for (const d of domains) {
+              for (const d of cookieDomains) {
                 // Format: domain \t flag \t path \t secure \t expiration \t name \t value
                 // CRITICAL: Use actual tab character, not spaces
                 netscapeContent += `${d}\tTRUE\t/\tFALSE\t${expiration}\t${name}\t${value}${CRLF}`

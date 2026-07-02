@@ -71,10 +71,34 @@
                 }
             }
             if (request.action === 'detectVideo') {
-                const url = location.href;
-                chrome.runtime.sendMessage({ action: 'sendDownload', url: url, filename: document.title || 'video', type: 'video/mp4' }, (res) => {
-                    sendResponse({ success: !!(res && res.success) });
-                });
+                // [TikTok] Sur le feed "Pour toi", location.href = tiktok.com/foryou (pas
+                // une vidéo précise). On résout dans l'ordre :
+                //   1) l'URL de page si c'est déjà une vidéo précise (/@x/video/id) -> yt-dlp
+                //   2) le flux CDN capturé de la vidéo active (sniffé par background.js) -> direct
+                //   3) repli: location.href (comportement historique)
+                (async () => {
+                    let url = getActiveTikTokVideoUrl();
+                    let headers = {};
+                    let via = 'page-url';
+                    if (!url) {
+                        const active = getMostActiveVideo();
+                        const mapped = active && videoUrlMap.get(active);
+                        console.log('[DoulGet detectVideo] activeVideo=', !!active, ' mappedCdn=', mapped && mapped.cdnUrl ? mapped.cdnUrl.substring(0, 70) : null);
+                        if (mapped && mapped.cdnUrl) { url = mapped.cdnUrl; headers = mapped.headers || {}; via = 'videoUrlMap-cdn'; }
+                        if (!url) {
+                            try {
+                                const res = await chrome.runtime.sendMessage({ action: 'getCachedVideoUrl' });
+                                console.log('[DoulGet detectVideo] getCachedVideoUrl ->', res);
+                                if (res && res.success && res.url) { url = res.url; headers = res.headers || {}; via = 'getCachedVideoUrl-cdn'; }
+                            } catch (e) { console.log('[DoulGet detectVideo] getCachedVideoUrl error', e); }
+                        }
+                    }
+                    if (!url) { url = location.href; via = 'fallback-location'; }
+                    console.log('[DoulGet detectVideo] FINAL url=', url, ' via=', via);
+                    chrome.runtime.sendMessage({ action: 'sendDownload', url: url, filename: document.title || 'video', type: 'video/mp4', headers: { ...headers, 'Referer': location.href } }, (res) => {
+                        sendResponse({ success: !!(res && res.success) });
+                    });
+                })();
                 return true;
             }
         });
@@ -103,6 +127,57 @@
                 return true;
             } catch (e) { return false; }
         });
+    }
+
+    // [TikTok] Retourne l'élément <video> le plus "actif" : en lecture et/ou le plus visible.
+    function getMostActiveVideo() {
+        try {
+            const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+            let best = null, bestScore = -Infinity;
+            document.querySelectorAll('video').forEach((v) => {
+                const r = v.getBoundingClientRect();
+                if (r.width < 50 || r.height < 50) return;
+                const visible = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+                if (visible <= 0) return;
+                const score = visible + (!v.paused ? 1e6 : 0);
+                if (score > bestScore) { bestScore = score; best = v; }
+            });
+            return best;
+        } catch (e) { return null; }
+    }
+
+    // [TikTok] Résout l'URL de PAGE d'une vidéo précise quand elle est disponible
+    // (yt-dlp gère mieux ces URLs, sans watermark). Retourne null sur le feed
+    // "Pour toi" -> l'appelant bascule alors sur le flux CDN capturé.
+    function getActiveTikTokVideoUrl() {
+        try {
+            if (!location.hostname.includes('tiktok.com')) return null;
+
+            // Déjà sur une page vidéo/photo précise -> l'URL courante est bonne.
+            if (/\/(video|photo)\/\d+/.test(location.pathname)) return location.href;
+
+            // Feed "Pour toi" : reconstruire l'URL canonique depuis l'<article> de la
+            // vidéo active. L'ID est dans l'id du lecteur (xgwrapper-0-<id>) et le pseudo
+            // dans le lien /@auteur du même article. Validé sur le DOM réel du feed :
+            // il n'existe AUCUN lien /video/id direct, d'où l'ancienne résolution qui
+            // échouait toujours.
+            const active = getMostActiveVideo();
+            if (!active) return null;
+            const art = active.closest('article[data-e2e="recommend-list-item-container"]') || active.closest('article');
+            if (!art) return null;
+            const wrap = art.querySelector('[id^="xgwrapper-"]');
+            const idMatch = wrap && wrap.id.match(/(\d{15,})/);
+            const videoId = idMatch ? idMatch[1] : null;
+            const authorA = art.querySelector('a[href^="/@"]');
+            const authorMatch = authorA && (authorA.getAttribute('href') || '').match(/^\/(@[^/?]+)/);
+            const author = authorMatch ? authorMatch[1] : null;
+            if (author && videoId) {
+                return `https://www.tiktok.com/${author}/video/${videoId}`;
+            }
+            return null;
+        } catch (e) {
+            return null;
+        }
     }
 
     function findAllEpisodes() {
@@ -644,7 +719,11 @@
                 e.preventDefault(); e.stopPropagation();
                 const currentUrl = location.href;
                 let downloadUrl = null, cachedHeaders = {};
-                const usePageUrlSites = ['xnxx.com', 'xvideos.com', 'pornhub.com', 'redtube.com', 'youporn.com', 'spankbang.com', 'youtube.com', 'youtu.be', 'facebook.com', 'fb.com', 'fb.watch', 'tiktok.com', 'instagram.com'];
+                // TikTok/Instagram retirés d'ici : yt-dlp ne peut plus extraire leurs
+                // pages (blocage anti-bot), donc envoyer l'URL de page échoue. On passe
+                // désormais par le flux CDN signé capturé + en-têtes (Cookie/Referer/UA),
+                // téléchargé en direct côté app comme le fait le navigateur.
+                const usePageUrlSites = ['xnxx.com', 'xvideos.com', 'pornhub.com', 'redtube.com', 'youporn.com', 'spankbang.com', 'youtube.com', 'youtu.be', 'facebook.com', 'fb.com', 'fb.watch'];
                 if (usePageUrlSites.some(site => currentUrl.includes(site))) {
                     downloadUrl = currentUrl;
                 } else {
@@ -655,6 +734,12 @@
                             const res = await chrome.runtime.sendMessage({ action: 'getCachedVideoUrl' });
                             if (res && res.success && res.url) { downloadUrl = res.url; cachedHeaders = res.headers || {}; }
                         } catch (err) { }
+                    }
+                    // Repli TikTok : URL de page canonique (/@auteur/video/id) reconstruite
+                    // depuis le DOM du feed, au cas où le CDN n'aurait pas été capturé.
+                    if (!downloadUrl && currentUrl.includes('tiktok.com')) {
+                        const built = getActiveTikTokVideoUrl();
+                        if (built) downloadUrl = built;
                     }
                     if (!downloadUrl) {
                         if (['lok-lok.cc', 'hakunaymatata.com', 'moovbob.fr', 'netfilm.world'].some(site => currentUrl.includes(site))) {
