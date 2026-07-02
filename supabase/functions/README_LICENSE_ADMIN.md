@@ -8,7 +8,7 @@ La logique sensible de licence/admin doit vivre dans `license-admin`, pas dans l
 supabase functions deploy license-admin
 ```
 
-L'ancienne fonction `generate-license` peut rester pour compatibilite webhook, mais elle lit maintenant aussi `LICENSE_SALT` depuis les secrets Supabase.
+La génération de clés se fait exclusivement via le panneau admin (`admin-generate-key` / `admin-bulk-generate`). L'ancienne fonction `generate-license` (webhook de vente auto) a été supprimée.
 
 ## Secrets requis
 

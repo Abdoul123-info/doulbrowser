@@ -136,11 +136,9 @@ serve(async (req) => {
       const key = String(body.key || "").trim()
       let verification = verifyLicense(key, machineId)
 
-      // Fallback base de données : les clés vendues sont créées par la fonction
-      // `generate-license` (webhook Chariow/Système.io) et enregistrées dans la
-      // table `licences`. Si la vérification cryptographique échoue (ex. salt
-      // désynchronisé entre les deux Edge Functions, ou évolution du format),
-      // on fait confiance à un enregistrement actif présent en base.
+      // Fallback base de données : si la vérification cryptographique échoue,
+      // on accepte tout de même une clé qui existe déjà comme enregistrement
+      // actif dans la table `licences` (ex. clé insérée/importée manuellement).
       if (!verification.valid) {
         const { data: dbLicense } = await supabase
           .from("licences")
