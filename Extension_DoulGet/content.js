@@ -719,16 +719,33 @@
                 e.preventDefault(); e.stopPropagation();
                 const currentUrl = location.href;
                 let downloadUrl = null, cachedHeaders = {};
-                // TikTok/Instagram retirés d'ici : yt-dlp ne peut plus extraire leurs
-                // pages (blocage anti-bot), donc envoyer l'URL de page échoue. On passe
-                // désormais par le flux CDN signé capturé + en-têtes (Cookie/Referer/UA),
-                // téléchargé en direct côté app comme le fait le navigateur.
-                const usePageUrlSites = ['xnxx.com', 'xvideos.com', 'pornhub.com', 'redtube.com', 'youporn.com', 'spankbang.com', 'youtube.com', 'youtu.be', 'facebook.com', 'fb.com', 'fb.watch'];
+                // TikTok retiré d'ici : yt-dlp ne peut plus extraire ses pages (blocage
+                // anti-bot), donc on passe par le flux CDN signé capturé + en-têtes,
+                // téléchargé en direct côté app. Instagram RESTE ici : son CDN diffuse
+                // en segments DASH (vidéo/audio séparés, byte-ranges) inutilisables en
+                // direct -> l'URL de page via yt-dlp est la seule voie exploitable.
+                const usePageUrlSites = ['xnxx.com', 'xvideos.com', 'pornhub.com', 'redtube.com', 'youporn.com', 'spankbang.com', 'youtube.com', 'youtu.be', 'facebook.com', 'fb.com', 'fb.watch', 'instagram.com'];
                 if (usePageUrlSites.some(site => currentUrl.includes(site))) {
                     downloadUrl = currentUrl;
                 } else {
-                    const mapped = videoUrlMap.get(video);
-                    if (mapped && mapped.cdnUrl) { downloadUrl = mapped.cdnUrl; cachedHeaders = mapped.headers || {}; }
+                    // TikTok feed : TikTok précharge la vidéo SUIVANTE, et chaque capture
+                    // réseau est mappée sur TOUS les <video> (videoUrlMap), donc le mapping
+                    // pointe souvent sur la vidéo d'après. La seule source fiable pour la
+                    // vidéo EN COURS est le src de l'élément <video> actif lui-même.
+                    let targetVideo = video;
+                    if (currentUrl.includes('tiktok.com')) {
+                        targetVideo = getMostActiveVideo() || video;
+                        const elemSrc = targetVideo.currentSrc || targetVideo.src || '';
+                        if (/^https?:/i.test(elemSrc)) {
+                            downloadUrl = elemSrc;
+                            const m = videoUrlMap.get(targetVideo);
+                            cachedHeaders = (m && m.headers) || {};
+                        }
+                    }
+                    if (!downloadUrl) {
+                        const mapped = videoUrlMap.get(targetVideo);
+                        if (mapped && mapped.cdnUrl) { downloadUrl = mapped.cdnUrl; cachedHeaders = mapped.headers || {}; }
+                    }
                     if (!downloadUrl) {
                         try {
                             const res = await chrome.runtime.sendMessage({ action: 'getCachedVideoUrl' });
@@ -750,7 +767,14 @@
                     }
                 }
                 try {
-                    const cleanTitle = getCleanTitle();
+                    let cleanTitle = getCleanTitle();
+                    // TikTok : le titre de page du feed est générique ("Regarde des vidéos
+                    // tendance...") -> nommer d'après l'auteur + l'id de la vidéo active.
+                    if (currentUrl.includes('tiktok.com')) {
+                        const built = getActiveTikTokVideoUrl();
+                        const mt = built && built.match(/@([^/]+)\/(?:video|photo)\/(\d+)/);
+                        if (mt) cleanTitle = `TikTok @${mt[1]} ${mt[2]}`;
+                    }
                     const filename = `${cleanTitle}${isAudio ? '.mp3' : '.mp4'}`;
                     btn.textContent = '...';
                     chrome.runtime.sendMessage({ action: 'sendDownload', url: downloadUrl, filename: filename, type: isAudio ? 'audio/mpeg' : 'video/mp4', audioOnly: isAudio, headers: { ...cachedHeaders, 'Referer': location.href } }, (response) => {
