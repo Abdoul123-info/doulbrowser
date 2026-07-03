@@ -24,7 +24,8 @@
         "tabs",
         "activeTab",
         "scripting",
-        "alarms"
+        "alarms",
+        "cookies"
     ],
     "host_permissions": [
         "http://*/*",

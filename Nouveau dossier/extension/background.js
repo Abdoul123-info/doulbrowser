@@ -503,7 +503,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ success: true });
             };
 
-            processDownload();
+            // [FIX Instagram/Facebook] processDownload() était appelé sans jamais
+            // récupérer les cookies : yt-dlp recevait l'URL de page sans session et
+            // Instagram répondait "empty media response". On joint les cookies du
+            // domaine (chrome.cookies) pour les plateformes qui exigent une session.
+            const cookieSites = ['instagram.com', 'facebook.com', 'fb.watch', 'fb.com', 'tiktok.com', 'twitter.com', 'x.com'];
+            const needsCookies = cookieSites.some(s => (request.url || '').includes(s));
+            const hasCookieAlready = !!(request.headers && request.headers['Cookie']);
+            if (needsCookies && !hasCookieAlready && chrome.cookies && chrome.cookies.getAll) {
+                try {
+                    chrome.cookies.getAll({ url: request.url }, (cookies) => {
+                        try {
+                            const header = (cookies || []).map(c => `${c.name}=${c.value}`).join('; ');
+                            processDownload(header);
+                        } catch (e) { processDownload(); }
+                    });
+                } catch (e) { processDownload(); }
+            } else {
+                processDownload();
+            }
             return true;
         }
 
