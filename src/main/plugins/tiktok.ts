@@ -32,9 +32,9 @@ export class TikTokPlugin implements Plugin {
     try {
       const u = new URL(url)
       const host = u.hostname.toLowerCase()
-      const isMainSiteHost = ['tiktok.com', 'www.tiktok.com', 'm.tiktok.com'].includes(host)
-      const isMediaPath = /\/(video|obj|aweme|tos)\//.test(u.pathname.toLowerCase())
-      // Page = domaine principal du site ET chemin non-media.
+      const isMainSiteHost = /(^|\.)tiktok\.com$/.test(host)
+      const isMediaPath = /\/(obj|aweme|tos)\//.test(u.pathname.toLowerCase())
+      // Page = domaine principal du site (y compris liens courts vm/vt/t) ET chemin non-media.
       if (isMainSiteHost && !isMediaPath) return 'yt-dlp'
       // Tout le reste (sous-domaines CDN, tiktokcdn, chemins media) = fichier direct.
       return 'direct'

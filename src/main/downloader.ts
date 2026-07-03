@@ -2,7 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { existsSync, promises as fsPromises } from 'fs'
 import * as fs from 'fs'
 import { join, dirname, sep } from 'path'
-import { spawn, execSync } from 'child_process'
+import { spawn, execFileSync } from 'child_process'
 import { URL } from 'url'
 
 import { state, RECENTLY_COMPLETED_TTL } from './globals'
@@ -58,8 +58,9 @@ async function convertHevcToH264IfNeeded(
     let codec = ''
     if (fs.existsSync(ffprobePath)) {
       try {
-        codec = execSync(
-          `"${ffprobePath}" -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "${filePath}"`,
+        codec = execFileSync(
+          ffprobePath,
+          ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1', filePath],
           { encoding: 'utf8', timeout: 15000 }
         )
           .trim()
@@ -96,6 +97,8 @@ async function convertHevcToH264IfNeeded(
       fs.rmSync(filePath)
       fs.renameSync(tmpOut, filePath)
       console.log('[Compat] Conversion H.264 terminée, fichier remplacé.')
+    } else if (fs.existsSync(tmpOut)) {
+      try { fs.rmSync(tmpOut) } catch {}
     }
   } catch (e) {
     // Best effort : en cas d'échec on garde le fichier HEVC d'origine (lisible sur VLC).
@@ -2106,14 +2109,25 @@ export async function downloadWithYtDlp(
       // v1.2.7: EXCLUDE YOUTUBE - yt-dlp works BETTER without cookies for YouTube
       // Reason: tv_embedded, ios, android clients don't support cookies
       //         web client with cookies causes "SABR streaming" and "n challenge" errors
+      const cookieHost = (() => {
+        try {
+          return new URL(url).hostname.toLowerCase()
+        } catch {
+          return ''
+        }
+      })()
+      const hostEndsWith = (suffix: string): boolean =>
+        cookieHost === suffix || cookieHost.endsWith('.' + suffix)
+
       const isSocialPlatform =
-        url.includes('tiktok.com') ||
-        url.includes('instagram.com') ||
-        url.includes('facebook.com') ||
-        url.includes('twitter.com')
+        hostEndsWith('tiktok.com') ||
+        hostEndsWith('instagram.com') ||
+        hostEndsWith('facebook.com') ||
+        hostEndsWith('twitter.com') ||
+        hostEndsWith('x.com')
 
       // YouTube: Never use cookies - works better with anonymous access
-      const isYouTube = url.includes('youtube.com') || url.includes('youtu.be')
+      const isYouTube = hostEndsWith('youtube.com') || hostEndsWith('youtu.be')
 
       if (isSocialPlatform && effectiveHeaders['Cookie']) {
         try {
@@ -2139,13 +2153,13 @@ export async function downloadWithYtDlp(
             '.googlevideo.com',
             '.youtube-nocookie.com'
           ]
-          if (url.includes('tiktok')) {
+          if (hostEndsWith('tiktok.com')) {
             cookieDomains = ['.tiktok.com', '.tiktokv.com', '.tiktokcdn.com', '.tiktokcdn-us.com']
-          } else if (url.includes('instagram')) {
+          } else if (hostEndsWith('instagram.com')) {
             cookieDomains = ['.instagram.com', '.cdninstagram.com', '.fbcdn.net']
-          } else if (url.includes('facebook') || url.includes('fb.watch')) {
+          } else if (hostEndsWith('facebook.com') || hostEndsWith('fb.watch')) {
             cookieDomains = ['.facebook.com', '.fbcdn.net']
-          } else if (url.includes('twitter') || url.includes('x.com')) {
+          } else if (hostEndsWith('twitter.com') || hostEndsWith('x.com')) {
             cookieDomains = ['.twitter.com', '.x.com', '.twimg.com']
           }
 

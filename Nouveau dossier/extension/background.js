@@ -508,7 +508,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // Instagram répondait "empty media response". On joint les cookies du
             // domaine (chrome.cookies) pour les plateformes qui exigent une session.
             const cookieSites = ['instagram.com', 'facebook.com', 'fb.watch', 'fb.com', 'tiktok.com', 'twitter.com', 'x.com'];
-            const needsCookies = cookieSites.some(s => (request.url || '').includes(s));
+            let needsCookies = false;
+            try {
+                const host = new URL(request.url || '').hostname;
+                needsCookies = cookieSites.some(s => host === s || host.endsWith('.' + s));
+            } catch (e) { needsCookies = false; }
             const hasCookieAlready = !!(request.headers && request.headers['Cookie']);
             if (needsCookies && !hasCookieAlready && chrome.cookies && chrome.cookies.getAll) {
                 try {
