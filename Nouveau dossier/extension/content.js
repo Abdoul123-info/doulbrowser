@@ -765,6 +765,14 @@
                         const mt = built && built.match(/@([^/]+)\/(?:video|photo)\/(\d+)/);
                         if (mt) cleanTitle = `TikTok @${mt[1]} ${mt[2]}`;
                     }
+                    // Instagram : le titre de page est toujours générique ("Instagram") ->
+                    // tous les fichiers s'appelleraient "Instagram.mp4" et se télescoperaient
+                    // (l'app "reprend" l'ancien fichier -> vidéo corrompue). On nomme d'après
+                    // l'ID du Reel/post pour garantir un nom unique par vidéo.
+                    if (currentUrl.includes('instagram.com')) {
+                        const im = currentUrl.match(/\/(?:reel|reels|p|tv)\/([A-Za-z0-9_-]+)/);
+                        if (im) cleanTitle = `Instagram ${im[1]}`;
+                    }
                     const filename = `${cleanTitle}${isAudio ? '.mp3' : '.mp4'}`;
                     btn.textContent = '...';
                     chrome.runtime.sendMessage({ action: 'sendDownload', url: downloadUrl, filename: filename, type: isAudio ? 'audio/mpeg' : 'video/mp4', audioOnly: isAudio, headers: { ...cachedHeaders, 'Referer': location.href } }, (response) => {
@@ -794,6 +802,44 @@
         const btnVideo = createActionButton(dgetMessage('videoBtn', '🎬 Vidéo'), false);
         const btnAudio = createActionButton(dgetMessage('audioBtn', '🎵 Audio'), true);
         container.appendChild(btnVideo); container.appendChild(btnAudio);
+
+        // [FIX Instagram] Le feed imbrique la vidéo très profondément : le conteneur
+        // en position:absolute se cale sur un parent géant et finit HORS de l'écran
+        // (elementFromPoint renvoie null), donc le clic tombe sur la vidéo (pause) au
+        // lieu du bouton. On ancre le conteneur en position:fixed sur le rectangle réel
+        // de la vidéo, attaché au body (échappe à tout contexte d'empilement), et on le
+        // ré-actualise au défilement / redimensionnement.
+        if (location.href.includes('instagram.com')) {
+            container.setAttribute('data-doul-fixed', '1');
+            container.style.setProperty('position', 'fixed', 'important');
+            container.style.setProperty('bottom', 'auto', 'important');
+            container.style.setProperty('top', '-9999px', 'important');
+            container.style.setProperty('left', '-9999px', 'important');
+            document.body.appendChild(container);
+            const reposition = () => {
+                if (!document.body.contains(container)) return false;
+                const vr = video.getBoundingClientRect();
+                const onScreen = vr.width > 40 && vr.height > 40 && vr.bottom > 60 && vr.top < window.innerHeight - 60;
+                if (!onScreen) { container.style.setProperty('display', 'none', 'important'); return true; }
+                container.style.setProperty('display', 'inline-flex', 'important');
+                const ch = container.offsetHeight || 44;
+                let topPx = Math.min(vr.bottom - ch - 16, window.innerHeight - ch - 8);
+                topPx = Math.max(8, topPx);
+                const leftPx = Math.max(8, vr.left + 12);
+                container.style.setProperty('top', topPx + 'px', 'important');
+                container.style.setProperty('left', leftPx + 'px', 'important');
+                return true;
+            };
+            reposition();
+            const rid = setInterval(() => { if (!reposition()) clearInterval(rid); }, 300);
+            window.addEventListener('scroll', reposition, true);
+            window.addEventListener('resize', reposition);
+            video.addEventListener('loadstart', () => {
+                btnVideo.innerHTML = dgetMessage('videoBtn', '🎬 Vidéo');
+                btnAudio.innerHTML = dgetMessage('audioBtn', '🎵 Audio');
+            });
+            return;
+        }
 
         let parentContainer = null;
         if (location.href.includes('youtube.com')) parentContainer = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
