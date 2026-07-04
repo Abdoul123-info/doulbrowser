@@ -23,6 +23,11 @@ export function sendNotification(title: string, body: string, sound: boolean = f
   }
 }
 
+// [v2.4.1] FIX EBUSY: pendant que autoUpdateYtDlp écrit yt-dlp.exe.tmp, ce fichier
+// incomplet ne doit PAS être pris pour une "mise à jour en attente" et échangé à chaud
+// (sinon yt-dlp.exe reste verrouillé en écriture et chaque spawn échoue avec EBUSY).
+let ytDlpUpdateInProgress = false
+
 // UTILITY: Ensure yt-dlp is available (check bundled or user data)
 export function ensureYtDlpAvailable(): string | null {
   const userDataPath = app.getPath('userData')
@@ -33,7 +38,7 @@ export function ensureYtDlpAvailable(): string | null {
   const tempBinary = userDataBinary + '.tmp'
 
   // Apply pending update if exists and is valid
-  if (existsSync(tempBinary)) {
+  if (existsSync(tempBinary) && !ytDlpUpdateInProgress) {
     try {
       const tempStats = fs.statSync(tempBinary)
       if (tempStats.isFile() && tempStats.size > 1000000) {
@@ -234,6 +239,7 @@ export async function autoUpdateYtDlp(): Promise<void> {
 
     const tempPath = targetPath + '.tmp'
     console.log('[yt-dlp] Downloading update...')
+    ytDlpUpdateInProgress = true
     await downloadFile(downloadUrl, tempPath)
 
     // [v2.3.7] SAFE UPDATE: Verify .tmp is valid BEFORE touching the old binary
@@ -245,6 +251,16 @@ export async function autoUpdateYtDlp(): Promise<void> {
     if (!tmpStats.isFile() || tmpStats.size < 1000000) {
       console.warn(`[yt-dlp] Downloaded .tmp is invalid (${tmpStats.size} bytes). Deleting and aborting.`)
       try { unlinkSync(tempPath) } catch (_e) {}
+      return
+    }
+
+    // [v2.4.1] Re-vérifier: des téléchargements ont pu démarrer pendant les ~30s du
+    // téléchargement de la mise à jour. Le .tmp complet sera appliqué au prochain démarrage.
+    const busyNow = Array.from(state.activeDownloads.values()).some(
+      (t) => t.process && !t.cancelled && !t.paused
+    )
+    if (busyNow) {
+      console.warn('[yt-dlp] Downloads started during update. Deferring replacement to next restart.')
       return
     }
 
@@ -279,6 +295,8 @@ export async function autoUpdateYtDlp(): Promise<void> {
     }
   } catch (error) {
     console.error('[yt-dlp] Auto-update failed:', error)
+  } finally {
+    ytDlpUpdateInProgress = false
   }
 }
 

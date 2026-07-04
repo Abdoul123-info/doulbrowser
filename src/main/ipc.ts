@@ -1,7 +1,7 @@
 import { app, ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import { existsSync } from 'fs'
 import * as fs from 'fs'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import * as https from 'https'
 import { createHash } from 'crypto'
 import { spawn } from 'child_process'
@@ -13,8 +13,9 @@ import {
   isSocialMediaURL,
   sanitizeStringForFilename
 } from './utils'
-import { 
-  saveSettings 
+import {
+  saveSettings,
+  getBaseDownloadDir
 } from './settings'
 import { 
   getMachineId 
@@ -79,7 +80,7 @@ export function registerIpcHandlers(win: BrowserWindow) {
 
     // [v1.2.9] AUTOMATIC FOLDER ORGANIZATION 📂
     const subFolder = (!!audioOnly) ? 'Audios' : 'Videos'
-    const finalPath = join(state.appSettings.downloadPath, subFolder)
+    const finalPath = join(getBaseDownloadDir(!!audioOnly), subFolder)
     if (!fs.existsSync(finalPath)) {
       try { fs.mkdirSync(finalPath, { recursive: true }) } catch (e) { }
     }
@@ -147,7 +148,7 @@ export function registerIpcHandlers(win: BrowserWindow) {
     if (!win) return
 
     try {
-      const downloadFolder = savePath || state.appSettings.downloadPath
+      const downloadFolder = savePath || getBaseDownloadDir(audioOnly)
       const trackerId = getTrackerId(url, audioOnly)
       console.log(`[Manual Download] Adding to queue: ${trackerId}`)
 
@@ -390,6 +391,10 @@ export function registerIpcHandlers(win: BrowserWindow) {
       }
     }
 
+    // [v2.4.0] Manual retry clears the permanent-failure flag so the download
+    // can run again and (if it succeeds) be treated normally.
+    if (tracker) tracker.failedPermanent = false
+
     // Cas 1 : téléchargement "classique" géré par Electron
     if (tracker && tracker.item) {
       if (tracker.item.isPaused()) {
@@ -513,24 +518,48 @@ export function registerIpcHandlers(win: BrowserWindow) {
     const finalSavePath = savePath || tracker?.savePath
     const finalFilename = filename || tracker?.filename
 
-    if (finalSavePath) {
-      if (finalFilename) {
-        // Best case: Open folder AND select the file
-        const fullPath = join(finalSavePath, finalFilename)
-        if (fs.existsSync(fullPath)) {
-          shell.showItemInFolder(fullPath)
-        } else {
-          // Fallback: File missing, open folder
-          shell.openPath(finalSavePath)
-        }
-      } else {
-        // No filename, just open folder
-        shell.openPath(finalSavePath)
-      }
-    } else {
-      // If no save path known, open default downloads folder
-      shell.openPath(app.getPath('downloads'))
+    // [v2.4.1] FIX: toujours ouvrir l'Explorateur avec le fichier SÉLECTIONNÉ, sans jamais
+    // lancer le média. savePath est parfois le chemin complet du fichier (pas le dossier),
+    // et le nom affiché peut différer du nom réel sur disque (.mp3, suffixe " (1)", etc.).
+    const isFile = (p?: string) => { try { return !!p && fs.statSync(p).isFile() } catch { return false } }
+    const isDir = (p?: string) => { try { return !!p && fs.statSync(p).isDirectory() } catch { return false } }
+
+    // 1) savePath pointe déjà sur le fichier lui-même
+    if (isFile(finalSavePath)) {
+      shell.showItemInFolder(finalSavePath!)
+      return
     }
+
+    const folder = isDir(finalSavePath) ? finalSavePath : (finalSavePath ? dirname(finalSavePath) : undefined)
+    if (folder && isDir(folder)) {
+      if (finalFilename) {
+        // 2) Meilleur cas: dossier + nom exacts -> sélection directe
+        const fullPath = join(folder, finalFilename)
+        if (isFile(fullPath)) {
+          shell.showItemInFolder(fullPath)
+          return
+        }
+        // 3) Le nom réel peut différer: chercher par nom de base (autre extension/suffixe)
+        try {
+          const base = finalFilename.replace(/\.[^.]+$/, '').trim().toLowerCase()
+          if (base.length > 2) {
+            const match = fs.readdirSync(folder).find(
+              (f) => f.toLowerCase().startsWith(base) && !/\.(part|ytdl|tmp)$/i.test(f)
+            )
+            if (match) {
+              shell.showItemInFolder(join(folder, match))
+              return
+            }
+          }
+        } catch (_e) { /* dossier illisible: on ouvre juste le dossier */ }
+      }
+      // 4) Dernier recours: ouvrir le dossier (jamais openPath sur un fichier)
+      shell.openPath(folder)
+      return
+    }
+
+    // Aucun chemin exploitable: dossier Téléchargements par défaut
+    shell.openPath(app.getPath('downloads'))
   })
 
   ipcMain.handle('download-select-path', async () => {
@@ -1107,7 +1136,7 @@ export function registerIpcHandlers(win: BrowserWindow) {
             url,
             error: error.message || 'Failed to download'
           })
-          handleDownloadEnd(url)
+          handleDownloadEnd(url, audioOnly) // [v2.4.0] Composite key
         }
       } else {
         try {
@@ -1136,7 +1165,7 @@ export function registerIpcHandlers(win: BrowserWindow) {
             url,
             error: error.message || 'Failed to download'
           })
-          handleDownloadEnd(url)
+          handleDownloadEnd(url, audioOnly) // [v2.4.0] Composite key
         }
       }
     }
@@ -1388,7 +1417,7 @@ export function registerIpcHandlers(win: BrowserWindow) {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return
 
-    const baseDownloadPath = state.appSettings.downloadPath
+    const baseDownloadPath = getBaseDownloadDir(audioOnly)
     const subFolder = audioOnly ? 'Audios' : 'Videos'
 
     // [v2.3.7] FIX DOUBLE SUBFOLDER: addToDownloadQueue already appends Videos/ or Audios/.

@@ -303,7 +303,7 @@ app.on('before-quit', (e) => {
     e.preventDefault()
     console.log('[Licensing] App quitting, signaling offline before exit...')
 
-    saveActiveDownloads()
+    saveActiveDownloads(true) // [v2.4.0] App exit → also kill running processes
 
     getMachineId()
       .then((mid) => {
@@ -326,7 +326,7 @@ app.on('before-quit', (e) => {
       }
     }, 5000)
   } else {
-    saveActiveDownloads()
+    saveActiveDownloads(true) // [v2.4.0] App exit → also kill running processes
   }
 })
 

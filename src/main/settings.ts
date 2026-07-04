@@ -6,6 +6,13 @@ import { state } from './globals'
 
 export const getSettingsPath = () => join(app.getPath('userData'), 'settings.json')
 
+// Dossier de base selon le type de fichier : les audios peuvent avoir leur propre
+// dossier (audioPath) ; sinon ils retombent sur downloadPath, comme les vidéos.
+export function getBaseDownloadDir(audioOnly: boolean): string {
+  const s = state.appSettings
+  return audioOnly && s.audioPath ? s.audioPath : s.downloadPath
+}
+
 export const settingsListeners: Array<(settings: AppSettings) => void> = []
 
 export const addSettingsListener = (listener: (settings: AppSettings) => void) => {
@@ -16,6 +23,7 @@ export const addSettingsListener = (listener: (settings: AppSettings) => void) =
 export function loadSettings(): AppSettings {
   const defaultSettings: AppSettings = {
     downloadPath: app ? app.getPath('downloads') : '',
+    audioPath: '',
     maxConcurrentDownloads: 3,
     maxRetries: 3,
     autoStart: false,

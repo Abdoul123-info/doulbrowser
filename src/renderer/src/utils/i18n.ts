@@ -22,6 +22,10 @@ export interface Translations {
     close: string;
     downloadFolder: string;
     downloadFolderDescription: string;
+    audioFolder: string;
+    audioFolderDescription: string;
+    audioFolderDefault: string;
+    audioFolderReset: string;
     browse: string;
     maxConcurrentDownloads: string;
     maxConcurrentDownloadsLabel: string;
@@ -352,6 +356,10 @@ const translations: Record<Language, Translations> = {
       close: 'Fermer',
       downloadFolder: 'Dossier de téléchargement',
       downloadFolderDescription: 'Dossier où seront sauvegardés les fichiers téléchargés',
+      audioFolder: 'Dossier audio',
+      audioFolderDescription: 'Dossier où seront sauvegardés les fichiers audio (MP3). Laissez vide pour utiliser le dossier de téléchargement.',
+      audioFolderDefault: 'Même dossier que les vidéos',
+      audioFolderReset: 'Réinitialiser (utiliser le dossier de téléchargement)',
       browse: 'Parcourir',
       maxConcurrentDownloads: 'Téléchargements simultanés',
       maxConcurrentDownloadsLabel: 'Nombre maximum de téléchargements simultanés',
@@ -665,6 +673,10 @@ const translations: Record<Language, Translations> = {
       close: 'Close',
       downloadFolder: 'Download Folder',
       downloadFolderDescription: 'Folder where downloaded files will be saved',
+      audioFolder: 'Audio Folder',
+      audioFolderDescription: 'Folder where audio files (MP3) will be saved. Leave empty to use the download folder.',
+      audioFolderDefault: 'Same folder as videos',
+      audioFolderReset: 'Reset (use the download folder)',
       browse: 'Browse',
       maxConcurrentDownloads: 'Simultaneous Downloads',
       maxConcurrentDownloadsLabel: 'Maximum number of simultaneous downloads',

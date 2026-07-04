@@ -287,11 +287,18 @@
                 const num = parseInt(urlMatch[1]);
                 filtered[playingIdx].title = `Episode ${num}`;
                 filtered[playingIdx].epNum = num;
-            } else if (filtered.length > 1) {
-                filtered.splice(playingIdx, 1);
             } else {
-                filtered[playingIdx].title = 'Episode 1';
-                filtered[playingIdx].epNum = 1;
+                // [v2.4.1] FIX 1er épisode: sans ep= dans l'URL, l'épisode en lecture est
+                // l'épisode par défaut (le 1er). Avant, il était RETIRÉ de la liste dès
+                // qu'il y avait d'autres épisodes -> absent du batch. On ne le retire que
+                // s'il est déjà listé via son bouton numéroté.
+                const nums = new Set(filtered.map(e => e.epNum).filter(Boolean));
+                if (nums.has(1)) {
+                    filtered.splice(playingIdx, 1);
+                } else {
+                    filtered[playingIdx].title = 'Episode 1';
+                    filtered[playingIdx].epNum = 1;
+                }
             }
         }
         filtered.sort((a, b) => (a.epNum || 0) - (b.epNum || 0));
@@ -989,10 +996,18 @@
                     batchBtn.textContent = 'Capture...';
                     batchBtn.disabled = true;
                     // [v1.9.7] Tell background not to auto-send individual downloads during batch
-                    chrome.storage.local.set({ batchMode: true });
+                    chrome.storage.local.set({ batchMode: true, batchModeAt: Date.now() }); // [v2.4.1] horodaté pour expiration de sécurité
                     const items = [];
                     const seMatch = location.href.match(/[?&]se=(\d+)/) || location.href.match(/[?&]detailSe=(\d+)/);
                     const currentSe = seMatch ? parseInt(seMatch[1]) : 1;
+                    // [v2.4.1] FIX 1er épisode: l'épisode déjà en lecture a son flux capturé
+                    // depuis le chargement de la page — souvent sous la clé 0, car la requête
+                    // initiale part sans ep=. On le met de côté AVANT la boucle: cliquer sur
+                    // l'épisode actif ne déclenche aucun nouvel appel API.
+                    const playingEpMatch = location.href.match(/[?&]ep=(\d+)/);
+                    const playingEpNum = playingEpMatch ? parseInt(playingEpMatch[1]) : 1;
+                    const initialKey0 = lokLokStreamCache[0] || null;
+                    try {
                     for (let i = 0; i < selected.length; i++) {
                         const ep = selected[i];
                         batchBtn.textContent = `Capture ${i+1}/${selected.length}`;
@@ -1041,16 +1056,27 @@
                                 console.log('[DoulGet Batch] 🔍 Looking for epNum:', epNumStr, 'or', epNumPadded);
                             }
 
+                        // [v2.4.1] FIX 1er épisode: copie de secours AVANT le delete. Pour
+                        // l'épisode en lecture, le clic ne déclenche rien: sans cette copie,
+                        // sa seule URL valide était supprimée puis le batch attendait 10s
+                        // pour rien et l'épisode était sauté.
+                        const cachedBefore = lokLokStreamCache[ep.epNum] || (ep.epNum === playingEpNum ? initialKey0 : null);
                         if (epBtns.length > 0) {
                             // Clear stale cache BEFORE clicking to avoid race condition
                             delete lokLokStreamCache[ep.epNum];
+                            delete lokLokStreamCache[0]; // [v2.4.1] une réponse sans ep= arrive sur la clé 0
                             epBtns[0].click();
                             const stream = await new Promise(resolve => {
                                 const start = Date.now();
                                 const check = setInterval(() => {
                                     // Key is just ep number; cached value is {url, se}
                                     if (lokLokStreamCache[ep.epNum]) { clearInterval(check); resolve(lokLokStreamCache[ep.epNum]); }
-                                    if (Date.now() - start > 10000) { clearInterval(check); resolve(null); }
+                                    // [v2.4.1] FIX: l'API du 1er épisode part souvent SANS ep=
+                                    // (clé 0). On vient de cliquer cet épisode précis, donc une
+                                    // réponse clé 0 arrivée maintenant est la sienne.
+                                    else if (lokLokStreamCache[0]) { clearInterval(check); resolve(lokLokStreamCache[0]); }
+                                    // [v2.4.1] Timeout 4s (au lieu de 10s) quand on a une copie de secours
+                                    else if (Date.now() - start > (cachedBefore ? 4000 : 10000)) { clearInterval(check); resolve(cachedBefore); }
                                 }, 200);
                             });
                             if (stream) {
@@ -1061,12 +1087,26 @@
                             } else {
                                 console.warn(`[DoulGet Batch] ❌ Failed to capture stream for Ep ${ep.epNum} (Timeout)`);
                             }
+                        } else if (cachedBefore) {
+                            // [v2.4.1] Bouton introuvable (rendu "en lecture" sans numéro)
+                            // mais le flux est déjà en cache: on le prend directement.
+                            const seStr = String(cachedBefore.se).padStart(2, '0');
+                            const epStr = String(ep.epNum).padStart(2, '0');
+                            console.log(`[DoulGet Batch] ✅ S${seStr}E${epStr} pris du cache (épisode en lecture)`);
+                            items.push({ url: cachedBefore.url, filename: `${baseTitle} - S${seStr}E${epStr}.mp4`, _se: cachedBefore.se });
                         } else {
                             console.warn(`[DoulGet Batch] ❌ Episode button not found for Ep ${ep.epNum}`);
                         }
                     }
                     await new Promise(r => setTimeout(r, 400));
                 }
+                    } catch (batchErr) {
+                        console.error('[DoulGet Batch] ⚠️ Erreur pendant la capture:', batchErr);
+                    } finally {
+                        // [v2.4.1] FIX: batchMode ne doit JAMAIS rester bloqué à true si la
+                        // capture plante, sinon la détection vidéo normale reste coupée.
+                        chrome.storage.local.set({ batchMode: false });
+                    }
                     console.log(`[DoulGet Batch] 📦 Prepared ${items.length} items for Lok-lok batch. Sending message...`);
                     // Determine season: prefer se from cache, fallback to currentSe
                     const detectedSe = (items.length > 0 && items[0]._se) ? items[0]._se : currentSe;

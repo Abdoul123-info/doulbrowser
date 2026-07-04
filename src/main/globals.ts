@@ -17,6 +17,7 @@ export interface GlobalState {
 export const state: GlobalState = {
   appSettings: {
     downloadPath: '',
+    audioPath: '',
     maxConcurrentDownloads: 3,
     maxRetries: 3,
     autoStart: false,

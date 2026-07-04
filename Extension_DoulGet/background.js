@@ -207,8 +207,11 @@ chrome.webRequest.onHeadersReceived.addListener(
 
         // Send to content script to map to video element
         // [v1.9.7] Skip if batch mode is active (content script handles streams directly)
-        chrome.storage.local.get('batchMode', (data) => {
-            if (data.batchMode) {
+        chrome.storage.local.get(['batchMode', 'batchModeAt'], (data) => {
+            // [v2.4.1] Sécurité: un batchMode resté bloqué à true (crash pendant une capture
+            // batch) expire après 15 min pour ne pas couper la détection vidéo indéfiniment.
+            const batchFresh = data.batchMode && (!data.batchModeAt || (Date.now() - data.batchModeAt) < 15 * 60 * 1000);
+            if (batchFresh) {
                 console.log('[Batch Mode] Suppressing videoCaptured for:', url.substring(0, 50));
                 return;
             }

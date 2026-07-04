@@ -196,6 +196,9 @@ export function DownloadList({ filter }: DownloadListProps) {
                         size: data.totalBytes ? formatBytes(data.totalBytes) : item.size,
                         timeLeft: '',
                         speed: '-',
+                        // [v2.4.1] Adopter le nom réel du fichier sur disque (utilisé par
+                        // "Ouvrir" et "Supprimer" pour retrouver le fichier exact)
+                        name: (isSuccess && data.filename) ? data.filename : item.name,
                         savePath: data.savePath || item.savePath,
                         statusMessage: '',
                         isExpanded: false
@@ -279,7 +282,8 @@ export function DownloadList({ filter }: DownloadListProps) {
                     url: data.url,
                     audioOnly: !!data.audioOnly, // [v1.7.0] Store format
                     createdAt: data.createdAt || Date.now(),
-                    savePath: data.savePath
+                    savePath: data.savePath,
+                    canResume: data.canResume // [v2.4.0] Enable manual retry for restored/interrupted items
                 };
                 return [newItem, ...prev];
             });

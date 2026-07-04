@@ -1,4 +1,4 @@
-import { X, Settings, HelpCircle, Globe, FolderOpen, Download, Bell, Power, RotateCcw, Key, ShieldCheck, Info } from 'lucide-react';
+import { X, Settings, HelpCircle, Globe, FolderOpen, Download, Bell, Power, RotateCcw, Key, ShieldCheck, Info, Music } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useTranslation, Language } from '../utils/i18n';
 
@@ -9,6 +9,7 @@ type SettingsModalProps = {
 
 interface AppSettings {
     downloadPath: string;
+    audioPath: string;
     maxConcurrentDownloads: number;
     maxRetries: number;
     autoStart: boolean;
@@ -27,6 +28,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const [showHelp, setShowHelp] = useState(false);
     const [settings, setSettings] = useState<AppSettings>({
         downloadPath: '',
+        audioPath: '',
         maxConcurrentDownloads: 3,
         maxRetries: 3,
         autoStart: false,
@@ -150,6 +152,22 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         }
     };
 
+    const selectAudioPath = async () => {
+        try {
+            // Réutilise le même sélecteur de dossier générique que pour les vidéos.
+            const path = await window.api.selectDownloadPath();
+            if (path) {
+                setSettings({ ...settings, audioPath: path });
+            }
+        } catch (error) {
+            console.error('Error selecting audio path:', error);
+        }
+    };
+
+    const resetAudioPath = () => {
+        setSettings({ ...settings, audioPath: '' });
+    };
+
     const handleLanguageChange = (newLang: Language) => {
         setSelectedLang(newLang);
     };
@@ -208,6 +226,44 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 </div>
                                 <p className="text-xs text-muted-foreground">
                                     {t.settings.downloadFolderDescription}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Section Dossier audio */}
+                        <div className="border border-border rounded-lg p-4">
+                            <div className="flex items-center gap-3 mb-4">
+                                <Music className="w-5 h-5 text-indigo-500" />
+                                <h4 className="font-semibold text-foreground">{t.settings.audioFolder}</h4>
+                            </div>
+                            <div className="space-y-3">
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={settings.audioPath}
+                                        readOnly
+                                        placeholder={t.settings.audioFolderDefault}
+                                        className="flex-1 px-3 py-2 bg-secondary/80 text-foreground border border-border rounded-md focus:outline-none"
+                                        style={{ color: 'hsl(var(--foreground))' }}
+                                    />
+                                    <button
+                                        onClick={selectAudioPath}
+                                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors"
+                                    >
+                                        {t.settings.browse}
+                                    </button>
+                                    {settings.audioPath && (
+                                        <button
+                                            onClick={resetAudioPath}
+                                            title={t.settings.audioFolderReset}
+                                            className="px-3 py-2 bg-secondary hover:bg-secondary/70 text-foreground border border-border rounded-md transition-colors"
+                                        >
+                                            <RotateCcw className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    {t.settings.audioFolderDescription}
                                 </p>
                             </div>
                         </div>

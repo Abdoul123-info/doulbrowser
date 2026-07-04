@@ -1,11 +1,12 @@
 import { app, BrowserWindow } from 'electron'
 import { existsSync, promises as fsPromises } from 'fs'
 import * as fs from 'fs'
-import { join, dirname, sep } from 'path'
+import { join, dirname, basename, sep } from 'path'
 import { spawn, execFileSync } from 'child_process'
 import { URL } from 'url'
 
 import { state, RECENTLY_COMPLETED_TTL } from './globals'
+import { getBaseDownloadDir } from './settings'
 import { pluginManager } from './plugins/manager'
 import { 
   safeSend, 
@@ -468,9 +469,18 @@ export function downloadSingleStreamWithRedirects(url: string, filePath: string,
     res.on('end', () => {
       fileStream.close()
       // Try calling handleDownloadEnd if available in scope
-      try { handleDownloadEnd(tracker?.originalUrl || url) } catch (e) { }
+      // [v2.4.0] Pass audioOnly so the composite tracker key resolves (was a silent no-op).
+      try { handleDownloadEnd(tracker?.originalUrl || url, tracker?.audioOnly) } catch (e) { }
       if (tracker) tracker.status = 'completed'
-      safeSend(win, 'download-complete', { url: tracker?.originalUrl || url, filePath })
+      safeSend(win, 'download-complete', {
+        url: tracker?.originalUrl || url,
+        filePath,
+        // [v2.4.1] dossier + nom réel + audioOnly pour que "Ouvrir" sélectionne le fichier
+        savePath: dirname(filePath),
+        filename: basename(filePath),
+        audioOnly: !!tracker?.audioOnly,
+        state: 'finished'
+      })
       resolvePromise()
     })
 
@@ -795,8 +805,18 @@ export async function downloadWithMultiThreading(url: string, savePath: string, 
 
     // Étape 2: Diviser le fichier en segments et télécharger en parallèle
     // [v1.2.9] AUTO-DYNAMIC CONNECTIONS ⚡
-    // If file is large enough, perform a quick speed test (512KB) to decide if we use multi-threading
-    if (fileInfo.size > 1024 * 1024) { // Only test if file > 1MB
+    // If file is large enough, perform a quick speed test to decide if we use multi-threading
+    // [v2.4.1] Test allégé (256KB, 3s max) et sauté pour les domaines de confiance et les
+    // reprises: il coûtait jusqu'à 5s avant chaque téléchargement, parfois pour rien.
+    const isTrustedHighSpeed =
+      url.includes('s2-download.xyz') ||
+      url.includes('filecr.com') ||
+      url.includes('microsoft.com') ||
+      url.includes('virtualbox.org') ||
+      url.includes('github.com') ||
+      url.includes('google.com')
+    const isResumingWithRanges = !!(tracker?.ranges && tracker.ranges.length > 0)
+    if (fileInfo.size > 1024 * 1024 && !isTrustedHighSpeed && !isResumingWithRanges) {
       console.log('[MultiThread] Testing connection speed...')
       const testStart = Date.now()
       const testResult = await new Promise<{ speed: number }>((resolve) => {
@@ -808,7 +828,7 @@ export async function downloadWithMultiThreading(url: string, savePath: string, 
           path: testUrl.pathname + testUrl.search,
           method: 'GET',
           headers: {
-            Range: 'bytes=0-524288',
+            Range: 'bytes=0-262143', // [v2.4.1] 256KB suffisent pour la mesure
             'User-Agent': tracker?.headers?.['User-Agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             ...requestHeaders
           }
@@ -823,28 +843,25 @@ export async function downloadWithMultiThreading(url: string, savePath: string, 
           res.on('error', () => resolve({ speed: 0 }))
         })
         testReq.on('error', () => resolve({ speed: 0 }))
-        testReq.setTimeout(5000, () => { testReq.destroy(); resolve({ speed: 0 }) })
+        testReq.setTimeout(3000, () => { testReq.destroy(); resolve({ speed: 0 }) }) // [v2.4.1] 5s -> 3s
         testReq.end()
       })
 
-      // [v2.3.6] IDM-STYLE: More permissive trusted domains
-      const isTrustedHighSpeed = 
-        url.includes('s2-download.xyz') || 
-        url.includes('filecr.com') ||
-        url.includes('microsoft.com') ||
-        url.includes('virtualbox.org') ||
-        url.includes('github.com') ||
-        url.includes('google.com');
-
       // [v2.3.6] Lowered threshold from 150KB/s to 20KB/s to favor multi-threading on stable slow lines
-      if (testResult.speed < 20 * 1024 && !isTrustedHighSpeed) { 
+      if (testResult.speed < 20 * 1024) {
         numThreads = 1
         console.log(`[MultiThread] Extremely slow connection detected (${Math.round(testResult.speed / 1024)} KB/s), forced to 1 connection.`)
-      } else if (isTrustedHighSpeed) {
-        console.log(`[MultiThread] Trusted high-speed domain (${new URL(url).hostname}), keeping ${numThreads} connections regardless of speed test result.`)
       } else {
         console.log(`[MultiThread] Healthy connection detected (${Math.round(testResult.speed / 1024)} KB/s), using ${numThreads} connections.`)
       }
+    } else if (isTrustedHighSpeed) {
+      console.log(`[MultiThread] Trusted high-speed domain (${new URL(url).hostname}), skipping speed test.`)
+    }
+
+    // [v2.4.1] Dimensionner les segments à la taille du fichier (~1 connexion par 2 Mo):
+    // un petit fichier était découpé en 32 tranches minuscules, dominées par la latence réseau.
+    if (!tracker?.numThreads && fileInfo.size > 0) {
+      numThreads = Math.max(1, Math.min(numThreads, Math.ceil(fileInfo.size / (2 * 1024 * 1024))))
     }
 
     // [v1.2.9] IDM Optimization: Use local temp directory (already initialized above)
@@ -895,8 +912,13 @@ export async function downloadWithMultiThreading(url: string, savePath: string, 
 
     // [v2.3.4] DYNAMIC WORKER SYSTEM
     const MAX_WORKERS = 32;
+    // [v2.4.1] Les domaines sensibles restent plafonnés même quand le scaler monte en charge
+    const maxWorkersForUrl = (hasSignature || isSensitiveDomain) ? 8 : MAX_WORKERS;
     let activeWorkers = 0;
     const trackerIdFinal = getTrackerId(url, audioOnly);
+    // [v2.4.1] Échantillon de vitesse agrégé (tous workers confondus) entre deux envois de progression
+    let speedSampleBytes = tracker?.ranges ? tracker.ranges.reduce((acc, r) => acc + r.downloaded, 0) : 0;
+    let speedSampleTime = Date.now();
 
     const downloadRange = async (rangeIndex: number, retryIdx: number = 0): Promise<void> => {
       const range = tracker!.ranges![rangeIndex];
@@ -967,8 +989,13 @@ export async function downloadWithMultiThreading(url: string, savePath: string, 
               trackerUpdate!.lastProgress = Math.min(Math.round((sumDownloaded / fileInfo.size) * 100), 100);
               
               const now = Date.now();
-              const elapsed = (now - trackerUpdate!.lastTime + 1) / 1000;
-              const speed = chunk.length / elapsed;
+              // [v2.4.1] FIX: vitesse = delta d'octets agrégés depuis le dernier envoi.
+              // L'ancien calcul (un seul chunk / intervalle) sous-estimait massivement
+              // le débit réel en multi-connexions et faussait l'ETA.
+              const elapsed = Math.max((now - speedSampleTime) / 1000, 0.05);
+              const speed = Math.max(sumDownloaded - speedSampleBytes, 0) / elapsed;
+              speedSampleBytes = sumDownloaded;
+              speedSampleTime = now;
               trackerUpdate!.lastTime = now;
               trackerUpdate!.lastSpeed = speed; // [v2.3.4] Store for scaler
 
@@ -1073,36 +1100,50 @@ export async function downloadWithMultiThreading(url: string, savePath: string, 
       }
     };
 
+    // [v2.4.1] FIX VITESSE: le scaler était créé APRÈS l'attente des workers, donc il ne
+    // tournait qu'une fois le téléchargement déjà fini (la montée 1→32 connexions n'était
+    // jamais appliquée) et son interval n'était jamais nettoyé en cas de succès (fuite timer).
+    const workerPromises: Promise<void>[] = [];
+    const spawnWorker = (startIdx?: number) => { workerPromises.push(runWorker(startIdx)); };
+
+    // Scaler loop to add connections if speed allows (e.g. from 1 to 32)
+    const scalingInterval = setInterval(() => {
+      if (isAborted || !tracker || tracker.paused || tracker.cancelled) return;
+      if (activeWorkers < maxWorkersForUrl) {
+        // [v2.3.6] IDM-Style Adaptive Scaling:
+        // Spawn more if speed > 200KB/s OR if we have less than 16 connections active
+        const avgSpeed = tracker?.lastSpeed || 0;
+        if (avgSpeed > 200 * 1024 || activeWorkers < Math.min(16, maxWorkersForUrl)) {
+          spawnWorker();
+        }
+      }
+    }, 10000);
+
     try {
       // Start initial pool of workers
-      const initialPool = Math.min(numThreads, MAX_WORKERS);
-      await Promise.all(Array.from({ length: initialPool }, (_, i) => runWorker(i < tracker!.ranges!.length ? i : undefined)));
-
-      // Scaler loop to add connections if speed allows (e.g. from 1 to 32)
-      const scalingInterval = setInterval(() => {
-        if (isAborted || !tracker || tracker.paused || tracker.cancelled) {
-           clearInterval(scalingInterval);
-           return;
-        }
-        if (activeWorkers < MAX_WORKERS) {
-           // [v2.3.6] IDM-Style Adaptive Scaling: 
-           // Spawn more if speed > 200KB/s OR if we have less than 16 connections active
-           const avgSpeed = tracker?.lastSpeed || 0;
-           if (avgSpeed > 200 * 1024 || activeWorkers < 16) {
-              runWorker();
-           }
-        }
-      }, 10000);
+      const initialPool = Math.min(numThreads, maxWorkersForUrl);
+      for (let i = 0; i < initialPool; i++) {
+        spawnWorker(i < tracker!.ranges!.length ? i : undefined);
+      }
+      // Attendre TOUS les workers, y compris ceux ajoutés par le scaler en cours de route
+      let settled = 0;
+      while (settled < workerPromises.length) {
+        const pending = workerPromises.slice(settled);
+        settled += pending.length;
+        await Promise.all(pending);
+      }
     } catch (err) {
       abortAllRequests();
       throw err;
+    } finally {
+      clearInterval(scalingInterval);
     }
 
     // [v2.3.1] Robust tracker retrieval with composite ID
     const trackerFinal = state.activeDownloads.get(trackerId)
     if (trackerFinal?.cancelled) {
       safeSend(win, 'download-cancelled', { url })
-      handleDownloadEnd(url)
+      handleDownloadEnd(url, !!audioOnly) // [v2.4.0] Composite key
       return
     }
     if (trackerFinal?.paused) return
@@ -1152,17 +1193,22 @@ export async function downloadWithMultiThreading(url: string, savePath: string, 
     await convertHevcToH264IfNeeded(finalPath, url, win, trackerFinal)
 
     safeSend(win, 'download-complete', {
-      filename: fileInfo.filename,
+      // [v2.4.1] FIX bouton "Ouvrir": envoyer le vrai nom sur disque et le DOSSIER.
+      // Avant, savePath contenait le chemin complet du fichier, et le fallback
+      // shell.openPath() LANÇAIT la vidéo au lieu de la sélectionner dans l'Explorateur.
+      filename: uniqueFilename,
       url: url,
+      audioOnly: !!audioOnly,
       state: 'finished',
-      savePath: finalPath
+      savePath: savePath,
+      filePath: finalPath
     })
     sendNotification(
       'Téléchargement terminé',
       `${fileInfo.filename} a été téléchargé avec succès`,
       true
     )
-    handleDownloadEnd(url)
+    handleDownloadEnd(url, !!audioOnly) // [v2.4.0] Composite key
 
     // Optional: Cleanup empty folder
     try {
@@ -1419,6 +1465,13 @@ export async function startDownloadFromQueue(queuedItem: QueuedDownload) {
     }
 
     // [v1.3.0] CRITICAL: Handle successful completion to free up queue slot
+    // [FIX] Atteindre cette ligne = le téléchargement a RÉUSSI (sinon exception).
+    // On force lastProgress à 100 pour que handleDownloadEnd retire bien le tracker :
+    // sur le chemin audio yt-dlp/aria2c, le parsing de progression rate parfois le
+    // 100%, et le tracker restait "incomplet" -> bloqué à 100% dans l'UI puis
+    // re-persisté et relancé (en échec) au redémarrage.
+    const doneTracker = state.activeDownloads.get(getTrackerId(url, !!queuedItem.audioOnly))
+    if (doneTracker) doneTracker.lastProgress = 100
     handleDownloadEnd(url, !!queuedItem.audioOnly)
   } catch (error: any) {
     console.error('Error starting download from queue:', error)
@@ -1440,6 +1493,8 @@ export async function startDownloadFromQueue(queuedItem: QueuedDownload) {
           queuedItem.headers,
           isWaitPage // [v1.9.41] Pass flag to give better error message
         )
+        const doneTrackerFb = state.activeDownloads.get(getTrackerId(url, !!queuedItem.audioOnly))
+        if (doneTrackerFb) doneTrackerFb.lastProgress = 100
         handleDownloadEnd(url, !!queuedItem.audioOnly)
         return
       } catch (innerError: any) {
@@ -1488,6 +1543,9 @@ export async function startDownloadFromQueue(queuedItem: QueuedDownload) {
     if (trackerErr) {
        trackerErr.statusMessage = `Erreur: ${errorMessage}`
        trackerErr.paused = true // Treat as paused/interrupted
+       // [v2.4.0] Retries are exhausted here → mark as permanently failed so it is NOT
+       // auto-resumed on the next app launch (avoids the infinite failure loop).
+       trackerErr.failedPermanent = true
        saveActiveDownloads() // Persist the error state
     }
 
@@ -1615,7 +1673,9 @@ export function addToDownloadQueue(
   }
 
   // [v1.2.9] AUTOMATIC FOLDER ORGANIZATION 📂
-  const baseDir = savePath || state.appSettings.downloadPath
+  // Les audios peuvent avoir leur propre dossier (audioPath) ; sinon on retombe
+  // sur downloadPath, comme les vidéos.
+  const baseDir = savePath || getBaseDownloadDir(!!audioOnly)
   const subFolder = audioOnly ? 'Audios' : 'Videos'
   
   // Robust check: prevent "Videos/Videos" on Windows and POSIX
@@ -2004,9 +2064,18 @@ export async function downloadWithYtDlp(
         downloadArgs.push('--downloader-args', ariaArgs)
         console.log(`[yt-dlp] Turbo Mode Enabled: Using aria2c (${useRestrictedThreads ? 'Safe Restricted' : 'Absolute Turbo'})`)
       } else if (isYouTubeDownload) {
+         // [v2.4.1] Fragments HLS/DASH en parallèle (prudent: 4 pour limiter le risque de 403)
+         downloadArgs.push('--concurrent-fragments', '4')
          console.log('[yt-dlp] YouTube detected: Using Native Downloader (No aria2c) to avoid rate limits and 403 Forbidden errors.');
-      } else if (isPalkadGroup) {
-         console.log('[yt-dlp] Palkad/Lok-Lok detected: Using Native Threading (No aria2c) for accurate progress.');
+      } else {
+         // [v2.4.1] FIX: le commentaire ci-dessus promettait --concurrent-fragments mais le
+         // flag n'était jamais passé — les fragments HLS se téléchargeaient un par un.
+         downloadArgs.push('--concurrent-fragments', '8')
+         if (isPalkadGroup) {
+           console.log('[yt-dlp] Palkad/Lok-Lok detected: Native downloader with 8 concurrent fragments.');
+         } else {
+           console.log('[yt-dlp] aria2c unavailable: native downloader with 8 concurrent fragments.');
+         }
       }
 
       // AUDIO CONVERSION LOGIC (MP3) - EXCLUSIVE PATH
@@ -2265,7 +2334,7 @@ export async function downloadWithYtDlp(
       // Fallback: Use 'which node' on Unix systems
       if (!nodeFoundDir && !isWindows) {
         try {
-          const whichNode = execSync('which node', { encoding: 'utf8' }).trim()
+          const whichNode = execFileSync('which', ['node'], { encoding: 'utf8' }).trim()
           if (whichNode && existsSync(whichNode)) {
             nodeFoundDir = dirname(whichNode)
           }
@@ -2740,7 +2809,10 @@ export async function downloadWithYtDlp(
 
                   if (win && !win.isDestroyed()) {
                     safeSend(win, 'download-complete', {
-                      url, filePath: finalPath, filename, totalBytes: fileSize, state: 'finished'
+                      // [v2.4.1] savePath (dossier) + audioOnly pour que l'UI retrouve
+                      // l'item et que "Ouvrir" sélectionne le bon fichier
+                      url, filePath: finalPath, filename, totalBytes: fileSize, state: 'finished',
+                      savePath, audioOnly: !!(audioOnly || tracker?.audioOnly)
                     })
                     safeSend(win, 'notification', { title: 'Terminé', body: filename })
                   }
@@ -2839,7 +2911,11 @@ export async function downloadWithYtDlp(
 
 
 
-export function saveActiveDownloads() {
+// [v2.4.0] killProcesses: only kill running processes/HTTP requests when the app is
+// actually quitting. Historically this cleanup ran on EVERY handleDownloadEnd() call,
+// which killed the yt-dlp processes and HTTP requests of OTHER downloads still running
+// in parallel — making simultaneous downloads fail. The kill loop is now gated.
+export function saveActiveDownloads(killProcesses: boolean = false) {
   try {
     const persistencePath = join(app.getPath('userData'), 'active-downloads.json')
 
@@ -2888,6 +2964,8 @@ export function saveActiveDownloads() {
         headers: tracker.headers || {},
         strategy: tracker.strategy || 'direct',
         audioOnly: !!tracker.audioOnly,
+        failedPermanent: !!tracker.failedPermanent, // [v2.4.0] Don't auto-retry on restart
+        statusMessage: tracker.statusMessage || '',
         timestamp: tracker.startTime || Date.now(),
         isQueued: false
       }))
@@ -2911,28 +2989,32 @@ export function saveActiveDownloads() {
     fs.writeFileSync(persistencePath, JSON.stringify({ downloads: allDownloads }, null, 2), 'utf-8')
     console.log(`[PERSISTENCE] Saved ${allDownloads.length} downloads (${activeToSave.length} active, ${queuedToSave.length} queued)`)
 
-    // CLEANUP: Kill all active processes to ensure clean exit
-    state.activeDownloads.forEach((tracker) => {
-      // Kill yt-dlp process
-      if (tracker.process) {
-        try {
-          console.log('[CLEANUP] Killing active yt-dlp process')
-          // Force kill on Windows
-          if (process.platform === 'win32') {
-            require('child_process').exec(`taskkill /pid ${tracker.process.pid} /T /F`)
-          } else {
-            tracker.process.kill('SIGKILL')
-          }
-        } catch (e) { console.error('[CLEANUP] Error killing process:', e) }
-      }
+    // CLEANUP: Kill all active processes ONLY when the app is exiting.
+    // [v2.4.0] Guarded: never kill mid-session, otherwise finishing one download
+    // would abort every other download still in progress.
+    if (killProcesses || state.isAppQuitting) {
+      state.activeDownloads.forEach((tracker) => {
+        // Kill yt-dlp process
+        if (tracker.process) {
+          try {
+            console.log('[CLEANUP] Killing active yt-dlp process (app exit)')
+            // Force kill on Windows
+            if (process.platform === 'win32') {
+              require('child_process').exec(`taskkill /pid ${tracker.process.pid} /T /F`)
+            } else {
+              tracker.process.kill('SIGKILL')
+            }
+          } catch (e) { console.error('[CLEANUP] Error killing process:', e) }
+        }
 
-      // Destroy active HTTP requests
-      if (tracker.httpRequests) {
-        tracker.httpRequests.forEach(req => {
-          try { req.destroy() } catch (e) { }
-        })
-      }
-    })
+        // Destroy active HTTP requests
+        if (tracker.httpRequests) {
+          tracker.httpRequests.forEach(req => {
+            try { req.destroy() } catch (e) { }
+          })
+        }
+      })
+    }
 
   } catch (error) {
     console.error('[PERSISTENCE] Error saving active downloads:', error)
@@ -3123,6 +3205,31 @@ export function restoreActiveDownloads(win: BrowserWindow) {
 
         const trackerId = getTrackerId(download.url, !!download.audioOnly)
         state.activeDownloads.set(trackerId, tracker)
+
+        // [v2.4.0] PERMANENT FAILURE: keep it visible but do NOT auto-resume, otherwise a
+        // dead link (expired session, removed media, etc.) would loop in failure at every
+        // launch. The user can retry manually via the UI.
+        if (download.failedPermanent) {
+          tracker.paused = true
+          tracker.failedPermanent = true
+          tracker.statusMessage = download.statusMessage || 'Échec précédent — cliquez pour réessayer'
+          if (win && !win.isDestroyed()) {
+            safeSend(win, 'download-started', {
+              url: download.url,
+              audioOnly: !!download.audioOnly,
+              name: download.filename,
+              size: formatBytes(download.totalBytes),
+              progress: tracker.lastProgress,
+              speed: '',
+              // 'interrupted' shows a manual Play/retry button in the UI (unlike 'error',
+              // which only offers Delete). canResume:true keeps that button enabled.
+              status: 'interrupted',
+              canResume: true,
+              error: tracker.statusMessage
+            })
+          }
+          return // Skip auto-resume queue push for this item
+        }
 
         // [v1.9.3] AUTO-RESUME: Directly add to queue instead of waiting for manual click
         state.downloadQueue.push({

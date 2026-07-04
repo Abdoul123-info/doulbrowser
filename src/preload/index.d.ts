@@ -20,6 +20,7 @@ export interface DownloadAPI {
   dismissDetectedDownload: (url: string) => void
   getSettings: () => Promise<{
     downloadPath: string
+    audioPath: string
     maxConcurrentDownloads: number
     maxRetries: number
     autoStart: boolean
@@ -33,6 +34,7 @@ export interface DownloadAPI {
   }>
   saveSettings: (settings: Partial<{
     downloadPath: string
+    audioPath: string
     maxConcurrentDownloads: number
     maxRetries: number
     autoStart: boolean

@@ -20,6 +20,10 @@ export interface DownloadTracker {
   process?: any
   cancelled?: boolean
   paused?: boolean
+  // [v2.4.0] Marks a download that exhausted its retries and failed permanently.
+  // Such downloads are NOT auto-resumed on app restart (they'd only loop in failure);
+  // they stay visible so the user can retry manually. Cleared on manual resume.
+  failedPermanent?: boolean
   lastProgress?: number // Store last known progress percentage
   httpRequests?: Array<{ destroy: () => void }> // Store HTTP requests to cancel them
   priority?: number // Higher number = higher priority
@@ -59,6 +63,8 @@ export interface QueuedDownload {
 
 export interface AppSettings {
   downloadPath: string
+  // Dossier dédié aux fichiers audio (vide = utilise downloadPath comme les vidéos)
+  audioPath: string
   maxConcurrentDownloads: number
   maxRetries: number
   autoStart: boolean
