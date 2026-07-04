@@ -1487,17 +1487,41 @@ export function registerIpcHandlers(win: BrowserWindow) {
     return ''
   }
 
+  // [v2.4.1] Lit la version d'un manifest.json d'extension ('0.0.0' si illisible)
+  function readExtensionManifestVersion(dir: string): string {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(join(dir, 'manifest.json'), 'utf8'))
+      return manifest.version || '0.0.0'
+    } catch {
+      return '0.0.0'
+    }
+  }
+
+  // [v2.4.1] Compare deux versions "x.y.z" (>0 si a plus récente que b)
+  function compareVersions(a: string, b: string): number {
+    const pa = a.split('.').map((n) => parseInt(n) || 0)
+    const pb = b.split('.').map((n) => parseInt(n) || 0)
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0)
+      if (d !== 0) return d
+    }
+    return 0
+  }
+
   // [v1.9.9] Get local extension version from manifest.json
+  // [v2.4.1] FIX: la version réellement installée (%APPDATA%, mises à jour auto
+  // comprises) prime sur la version embarquée dans l'app — sinon la version
+  // affichée mentait après une mise à jour d'extension.
   ipcMain.handle('get-extension-version', async () => {
     try {
-      const srcPath = getExtensionSourcePath()
-      if (srcPath) {
-        const manifestPath = join(srcPath, 'manifest.json')
-        if (fs.existsSync(manifestPath)) {
-          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-          return manifest.version || '1.9.9'
-        }
+      const destPath = join(app.getPath('appData'), 'doul-get', 'DoulGet_Extension')
+      const candidates = [destPath, getExtensionSourcePath()].filter(Boolean) as string[]
+      let best = '0.0.0'
+      for (const dir of candidates) {
+        const v = readExtensionManifestVersion(dir)
+        if (compareVersions(v, best) > 0) best = v
       }
+      if (best !== '0.0.0') return best
     } catch (e) {
       console.error('Error getting extension version:', e)
     }
@@ -1513,29 +1537,55 @@ export function registerIpcHandlers(win: BrowserWindow) {
       }
       
       const destPath = join(app.getPath('appData'), 'doul-get', 'DoulGet_Extension')
-      
-      if (fs.existsSync(destPath)) {
-        fs.rmSync(destPath, { recursive: true, force: true })
+
+      // [v2.4.1] FIX anti-régression: si %APPDATA% contient déjà une version PLUS
+      // RÉCENTE (installée par la mise à jour auto Supabase), ne pas l'écraser avec
+      // la version embarquée dans l'installateur.
+      const bundledVersion = readExtensionManifestVersion(srcPath)
+      const installedVersion = readExtensionManifestVersion(destPath)
+      if (compareVersions(installedVersion, bundledVersion) > 0) {
+        console.log(`[Extension] Version installée ${installedVersion} plus récente que l'embarquée ${bundledVersion}: copie ignorée.`)
+      } else {
+        if (fs.existsSync(destPath)) {
+          fs.rmSync(destPath, { recursive: true, force: true })
+        }
+        fs.mkdirSync(destPath, { recursive: true })
+        fs.cpSync(srcPath, destPath, { recursive: true, force: true })
+        console.log(`[Extension] Extension files prepared at: ${destPath}`)
       }
-      fs.mkdirSync(destPath, { recursive: true })
-      fs.cpSync(srcPath, destPath, { recursive: true, force: true })
-      
-      console.log(`[Extension] Extension files prepared at: ${destPath}`)
-      
+
       try {
         const desktopPath = join(app.getPath('desktop'), 'DoulGet_Extension_Path.txt')
         fs.writeFileSync(desktopPath, destPath, 'utf8')
       } catch (e) {
         console.error('[Extension] Failed to write path to desktop helper file:', e)
       }
-      
+
+      // [v2.4.1] FIX: "start chrome" échouait en silence sans Chrome installé alors
+      // que l'UI affirmait que Chrome s'était ouvert. On cherche l'exécutable
+      // (Chrome puis Edge) et on remonte browserOpened à l'UI.
+      let browserOpened = false
       try {
-        spawn('cmd.exe', ['/c', 'start chrome chrome://extensions/'], { detached: true, stdio: 'ignore' })
+        const candidates = [
+          join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          join(process.env['LOCALAPPDATA'] || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+          join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+        ]
+        const browserExe = candidates.find((p) => fs.existsSync(p))
+        if (browserExe) {
+          spawn(browserExe, ['chrome://extensions/'], { detached: true, stdio: 'ignore' }).unref()
+          browserOpened = true
+        } else {
+          // Dernier recours: laisser Windows résoudre "chrome" (peut échouer en silence)
+          spawn('cmd.exe', ['/c', 'start chrome chrome://extensions/'], { detached: true, stdio: 'ignore' })
+        }
       } catch (e) {
-        console.error('[Extension] Failed to launch chrome:', e)
+        console.error('[Extension] Failed to launch browser:', e)
       }
-      
-      return { success: true, extensionPath: destPath }
+
+      return { success: true, extensionPath: destPath, browserOpened }
     } catch (error: any) {
       console.error('[Extension] Error preparing extension:', error)
       return { success: false, error: error.message || 'Error preparing extension files.' }
@@ -1584,6 +1634,14 @@ export function registerIpcHandlers(win: BrowserWindow) {
       
       console.log('[Extension] Extracting updated files...')
       const destPath = join(app.getPath('appData'), 'doul-get', 'DoulGet_Extension')
+      // [v2.4.1] FIX: vider le dossier avant extraction — sinon les fichiers
+      // supprimés entre deux versions traînaient (extension hybride).
+      try {
+        if (fs.existsSync(destPath)) fs.rmSync(destPath, { recursive: true, force: true })
+        fs.mkdirSync(destPath, { recursive: true })
+      } catch (e) {
+        console.warn('[Extension] Impossible de vider le dossier avant extraction:', e)
+      }
       const AdmZip = require('adm-zip')
       const zip = new AdmZip(tempZipPath)
       zip.extractAllTo(destPath, true)

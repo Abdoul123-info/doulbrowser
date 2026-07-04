@@ -12,6 +12,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
     const [version, setVersion] = useState('...');
     const [installStatus, setInstallStatus] = useState<'idle' | 'installing' | 'success' | 'error'>('idle');
     const [extensionPath, setExtensionPath] = useState('');
+    const [browserOpened, setBrowserOpened] = useState(true);
 
     useEffect(() => {
         if (isOpen) {
@@ -27,6 +28,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
             const res = await window.api.registerExtensionInBrowsers();
             if (res.success) {
                 setExtensionPath(res.extensionPath || '');
+                setBrowserOpened(res.browserOpened !== false);
                 setInstallStatus('success');
             } else {
                 setInstallStatus('error');
@@ -105,11 +107,14 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
                                     </div>
                                     <p className="text-[11px] text-gray-300 font-semibold">Suivez ces étapes dans Chrome :</p>
                                     <ol className="text-[11px] text-gray-300 space-y-1 list-decimal list-inside">
-                                        <li>Chrome s'est ouvert sur <span className="text-blue-400">chrome://extensions/</span></li>
+                                        <li>{browserOpened
+                                            ? <>Votre navigateur s'est ouvert sur <span className="text-blue-400">chrome://extensions/</span></>
+                                            : <>Ouvrez <span className="text-blue-400">chrome://extensions/</span> dans votre navigateur</>}</li>
                                         <li>Activez le <strong className="text-white">Mode développeur</strong> (haut à droite)</li>
                                         <li>Cliquez <strong className="text-white">"Charger l'extension non empaquetée"</strong></li>
                                         <li>Sélectionnez ce dossier :</li>
                                     </ol>
+                                    <p className="text-[10px] text-amber-300/90 italic">⟳ Si l'extension est déjà installée, cliquez plutôt sur le bouton Actualiser de la carte DoulGet dans chrome://extensions/.</p>
                                     {extensionPath && (
                                         <div className="bg-black/40 rounded p-2 text-[10px] text-blue-300 font-mono break-all border border-blue-500/20 select-all cursor-text">
                                             {extensionPath}
