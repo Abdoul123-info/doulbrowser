@@ -292,12 +292,27 @@ serve(async (req) => {
 
       const extension = type === "setup" ? "exe" : "zip"
       const baseName = type === "setup" ? "DoulGet_Setup" : "DoulGet_Extension"
-      const remotePath = `${baseName}_${Date.now()}.${extension}`
+      // [v2.4.1] Nom FIXE écrasé à chaque publication: le stockage gratuit (500 Mo)
+      // saturait car chaque upload créait un nouveau fichier horodaté de ~190 Mo.
+      const remotePath = `${baseName}.${extension}`
+
+      // Purge avant upload: l'ancien fichier au nom fixe (sinon l'URL signée est
+      // refusée car l'objet existe) + les anciens fichiers horodatés hérités.
+      try {
+        const { data: files } = await supabase.storage.from("updates").list()
+        const toRemove = (files || [])
+          .map((f) => f.name)
+          .filter((n) => n === remotePath || n.startsWith(`${baseName}_`))
+        if (toRemove.length > 0) await supabase.storage.from("updates").remove(toRemove)
+      } catch (_e) { /* nettoyage best-effort */ }
+
       const { data, error } = await supabase.storage.from("updates").createSignedUploadUrl(remotePath)
 
       if (error) throw error
 
-      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/updates/${remotePath}`
+      // [v2.4.1] ?v= anti-cache CDN: l'URL publique change à chaque publication
+      // (le CDN ne doit pas servir l'ancien binaire sous la même URL), le fichier non.
+      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/updates/${remotePath}?v=${Date.now()}`
       return json({
         success: true,
         signedUrl: data.signedUrl,
