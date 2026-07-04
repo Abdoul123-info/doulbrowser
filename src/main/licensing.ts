@@ -134,16 +134,26 @@ export async function supabaseRequest(
 export async function uploadFileToSignedUrl(
   localPath: string,
   signedUrl: string,
-  publicUrl: string
+  publicUrl: string,
+  uploadToken?: string
 ): Promise<{ success: boolean; url?: string; error?: string; code?: number }> {
   if (!signedUrl) return { success: false, error: 'URL upload signée manquante.' }
 
   try {
     const fileContent = fs.readFileSync(localPath)
-    const targetUrl = signedUrl.startsWith('http')
-      ? signedUrl
-      : `${SUPABASE_URL}${signedUrl.startsWith('/') ? '' : '/'}${signedUrl}`
-    const url = new URL(targetUrl)
+    // [v2.4.1] Les URLs signées relatives (storage-js v1) omettent /storage/v1
+    let normalizedUrl = signedUrl
+    if (!normalizedUrl.startsWith('http')) {
+      const rel = normalizedUrl.startsWith('/') ? normalizedUrl : `/${normalizedUrl}`
+      normalizedUrl = rel.includes('/storage/v1/')
+        ? `${SUPABASE_URL}${rel}`
+        : `${SUPABASE_URL}/storage/v1${rel}`
+    }
+    const url = new URL(normalizedUrl)
+    // [v2.4.1] Secours: si le jeton d'upload n'est pas déjà dans l'URL, l'ajouter
+    if (uploadToken && !url.searchParams.get('token')) {
+      url.searchParams.set('token', uploadToken)
+    }
 
     const attemptUpload = (
       method: 'PUT' | 'POST'
@@ -154,6 +164,11 @@ export async function uploadFileToSignedUrl(
         path: url.pathname + url.search,
         method,
         headers: {
+          // [v2.4.1] FIX 400 "headers must have required property 'authorization'":
+          // l'API Storage exige apikey + Authorization même pour un upload signé
+          // (le jeton de l'URL autorise l'écriture; ces en-têtes passent le middleware).
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
           'Content-Type': 'application/octet-stream',
           'Content-Length': fileContent.length
         }

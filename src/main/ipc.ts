@@ -1061,7 +1061,7 @@ export function registerIpcHandlers(win: BrowserWindow) {
         return { success: false, error: uploadTicket.error || 'Impossible de preparer l\'upload signe.' }
     }
 
-    const res = await uploadFileToSignedUrl(localPath, uploadTicket.signedUrl, uploadTicket.publicUrl);
+    const res = await uploadFileToSignedUrl(localPath, uploadTicket.signedUrl, uploadTicket.publicUrl, uploadTicket.token);
 
     if (res.success && res.url) {
         await licenseBackendRequest('admin-set-latest-version', {
