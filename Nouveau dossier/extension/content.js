@@ -71,13 +71,34 @@
                 }
             }
             if (request.action === 'detectVideo') {
-                // [TikTok] Sur le feed "Pour toi", location.href vaut tiktok.com/foryou
-                // (pas une vidéo). On tente de résoudre la vraie URL de la vidéo active,
-                // sinon on garde le comportement historique (location.href).
-                const url = getActiveTikTokVideoUrl() || location.href;
-                chrome.runtime.sendMessage({ action: 'sendDownload', url: url, filename: document.title || 'video', type: 'video/mp4' }, (res) => {
-                    sendResponse({ success: !!(res && res.success) });
-                });
+                // [TikTok] Sur le feed "Pour toi", location.href = tiktok.com/foryou (pas
+                // une vidéo précise). On résout dans l'ordre :
+                //   1) l'URL de page si c'est déjà une vidéo précise (/@x/video/id) -> yt-dlp
+                //   2) le flux CDN capturé de la vidéo active (sniffé par background.js) -> direct
+                //   3) repli: location.href (comportement historique)
+                (async () => {
+                    let url = getActiveTikTokVideoUrl();
+                    let headers = {};
+                    let via = 'page-url';
+                    if (!url) {
+                        const active = getMostActiveVideo();
+                        const mapped = active && videoUrlMap.get(active);
+                        console.log('[DoulGet detectVideo] activeVideo=', !!active, ' mappedCdn=', mapped && mapped.cdnUrl ? mapped.cdnUrl.substring(0, 70) : null);
+                        if (mapped && mapped.cdnUrl) { url = mapped.cdnUrl; headers = mapped.headers || {}; via = 'videoUrlMap-cdn'; }
+                        if (!url) {
+                            try {
+                                const res = await chrome.runtime.sendMessage({ action: 'getCachedVideoUrl' });
+                                console.log('[DoulGet detectVideo] getCachedVideoUrl ->', res);
+                                if (res && res.success && res.url) { url = res.url; headers = res.headers || {}; via = 'getCachedVideoUrl-cdn'; }
+                            } catch (e) { console.log('[DoulGet detectVideo] getCachedVideoUrl error', e); }
+                        }
+                    }
+                    if (!url) { url = location.href; via = 'fallback-location'; }
+                    console.log('[DoulGet detectVideo] FINAL url=', url, ' via=', via);
+                    chrome.runtime.sendMessage({ action: 'sendDownload', url: url, filename: document.title || 'video', type: 'video/mp4', headers: { ...headers, 'Referer': location.href } }, (res) => {
+                        sendResponse({ success: !!(res && res.success) });
+                    });
+                })();
                 return true;
             }
         });
@@ -125,9 +146,9 @@
         } catch (e) { return null; }
     }
 
-    // [TikTok] Résout l'URL de la vidéo actuellement visible/lue sur le feed.
-    // Retourne null si on n'est pas sur TikTok ou si rien n'a pu être résolu
-    // (l'appelant retombe alors sur location.href).
+    // [TikTok] Résout l'URL de PAGE d'une vidéo précise quand elle est disponible
+    // (yt-dlp gère mieux ces URLs, sans watermark). Retourne null sur le feed
+    // "Pour toi" -> l'appelant bascule alors sur le flux CDN capturé.
     function getActiveTikTokVideoUrl() {
         try {
             if (!location.hostname.includes('tiktok.com')) return null;
@@ -135,25 +156,14 @@
             // Déjà sur une page vidéo/photo précise -> l'URL courante est bonne.
             if (/\/(video|photo)\/\d+/.test(location.pathname)) return location.href;
 
-            // 1) Trouver la vidéo la plus "active" : celle qui joue et/ou la plus visible.
-            const vh = window.innerHeight || document.documentElement.clientHeight || 0;
-            let best = null, bestScore = -Infinity;
-            document.querySelectorAll('video').forEach((v) => {
-                const r = v.getBoundingClientRect();
-                if (r.width < 50 || r.height < 50) return;
-                const visible = Math.min(r.bottom, vh) - Math.max(r.top, 0);
-                if (visible <= 0) return;
-                const score = visible + (!v.paused ? 1e6 : 0);
-                if (score > bestScore) { bestScore = score; best = v; }
-            });
-            if (!best) return null;
-
-            // 2) Reconstruire l'URL canonique depuis l'<article> de la vidéo active.
-            //    L'ID est dans l'id du lecteur (xgwrapper-0-<id>) et le pseudo dans le
-            //    lien /@auteur du même article. Validé sur le DOM réel du feed : il
-            //    n'existe AUCUN lien /video/id direct, d'où l'ancienne résolution qui
-            //    échouait toujours.
-            const art = best.closest('article[data-e2e="recommend-list-item-container"]') || best.closest('article');
+            // Feed "Pour toi" : reconstruire l'URL canonique depuis l'<article> de la
+            // vidéo active. L'ID est dans l'id du lecteur (xgwrapper-0-<id>) et le pseudo
+            // dans le lien /@auteur du même article. Validé sur le DOM réel du feed :
+            // il n'existe AUCUN lien /video/id direct, d'où l'ancienne résolution qui
+            // échouait toujours.
+            const active = getMostActiveVideo();
+            if (!active) return null;
+            const art = active.closest('article[data-e2e="recommend-list-item-container"]') || active.closest('article');
             if (!art) return null;
             const wrap = art.querySelector('[id^="xgwrapper-"]');
             const idMatch = wrap && wrap.id.match(/(\d{15,})/);
@@ -246,7 +256,7 @@
 
                 const href = el.href || el.querySelector('a')?.href || (el.tagName === 'A' ? el.href : null);
                 let se = '01';
-                if (location.href.includes('lok-lok.cc') || location.href.includes('movie-box.co') || location.href.includes('moviebox')) {
+                if (location.href.includes('lok-lok.cc') || location.href.includes('movie-box.co') || location.href.includes('moviebox') || location.href.includes('netfilm.world')) {
                     const sMatch = location.href.match(/[?&]se=(\d+)/) || location.href.match(/[?&]detailSe=(\d+)/);
                     if (sMatch) se = sMatch[1];
                 }
@@ -497,7 +507,7 @@
     function getContentType() {
         const url = window.location.href.toLowerCase().split('?')[0];
         const bodyText = document.body.innerText.substring(0, 5000); 
-        const isLokLok = url.includes('lok-lok.cc') || url.includes('movie-box.co') || url.includes('moviebox');
+        const isLokLok = url.includes('lok-lok.cc') || url.includes('movie-box.co') || url.includes('moviebox') || url.includes('netfilm.world');
         const docExtensions = ['.pdf', '.zip', '.rar', '.7z', '.exe', '.msi', '.apk', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'];
         if (docExtensions.some(ext => url.endsWith(ext))) return 'document';
 
@@ -756,7 +766,7 @@
                         if (built) downloadUrl = built;
                     }
                     if (!downloadUrl) {
-                        if (['lok-lok.cc', 'hakunaymatata.com', 'moovbob.fr'].some(site => currentUrl.includes(site))) {
+                        if (['lok-lok.cc', 'hakunaymatata.com', 'moovbob.fr', 'netfilm.world'].some(site => currentUrl.includes(site))) {
                             btn.textContent = dgetMessage('waitingLink', '...');
                             setTimeout(() => { btn.innerHTML = text; }, 3000); return;
                         }
@@ -981,7 +991,7 @@
                 const selected = Array.from(epWrapper.querySelectorAll('.doul-ep-checkbox')).filter(cb => cb.checked).map(cb => list[parseInt(cb.getAttribute('data-index'))]);
                 if (selected.length === 0) return;
                 const baseTitle = getCleanTitle().replace(/S\d+E\d+/i, '').trim();
-                const isLokLok = location.href.includes('lok-lok.cc') || location.href.includes('movie-box.co') || location.href.includes('moviebox');
+                const isLokLok = location.href.includes('lok-lok.cc') || location.href.includes('movie-box.co') || location.href.includes('moviebox') || location.href.includes('netfilm.world');
                 if (isLokLok) {
                     batchBtn.textContent = 'Capture...';
                     batchBtn.disabled = true;

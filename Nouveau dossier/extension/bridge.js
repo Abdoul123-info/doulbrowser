@@ -34,7 +34,7 @@
     // [v1.6.1] Lok-lok API Response Interception — capture stream URLs from page's own API calls
     // This runs in MAIN world, so we can intercept the page's fetch/XHR with cookies intact
     (function interceptLokLokStreams() {
-        if (!location.href.includes('lok-lok.cc') && !location.href.includes('movie-box.co') && !location.href.includes('moviebox')) return;
+        if (!location.href.includes('lok-lok.cc') && !location.href.includes('movie-box.co') && !location.href.includes('moviebox') && !location.href.includes('netfilm.world')) return;
 
         const PLAY_API = 'wefeed-h5api-bff/subject/play';
 
