@@ -1,5 +1,5 @@
 import { X, ShieldAlert, ShieldCheck, Key, FileText, Clipboard, CheckCircle2, AlertCircle, Cloud, RefreshCw, UploadCloud, Package, Search, Star, MessageSquare, AlertTriangle } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from '../utils/i18n';
 
 type AdminModalProps = {
@@ -25,9 +25,16 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     const [newUpdateUrl, setNewUpdateUrl] = useState('');
     const [newExtensionVersion, setNewExtensionVersion] = useState('');
     const [newExtensionUrl, setNewExtensionUrl] = useState('');
+    // [v2.4.2] Hashes SHA-256 publiés avec la version (auto après upload, ou via fichier local)
+    const [newUpdateHash, setNewUpdateHash] = useState('');
+    const [newExtensionHash, setNewExtensionHash] = useState('');
     const [cloudLicenses, setCloudLicenses] = useState<any[]>([]);
     const [isLoadingCloud, setIsLoadingCloud] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
+    // [v2.4.2] Progression de l'upload en cours (setup ou extension)
+    const [uploadProgress, setUploadProgress] = useState<{ type: 'setup' | 'extension', percent: number, uploaded: number, total: number, speed?: number, etaSeconds?: number } | null>(null);
+    // [v2.4.2] Ref miroir d'isUploading: ignore les events IPC retardataires après la fin
+    const isUploadingRef = useRef(false);
     const [searchCloud, setSearchCloud] = useState('');
     const [feedbackList, setFeedbackList] = useState<any[]>([]);
     const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
@@ -65,6 +72,30 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
         }
         return () => clearInterval(interval);
     }, [activeTab, isAuthenticated]);
+
+    // [v2.4.2] Abonnement à la progression de l'upload admin
+    useEffect(() => {
+        window.api.onAdminUploadProgress((_e, data) => {
+            if (!isUploadingRef.current) return; // event fantôme après fin/erreur
+            setUploadProgress({ type: data.type, percent: data.percent, uploaded: data.uploaded, total: data.total, speed: data.speed, etaSeconds: data.etaSeconds });
+        });
+        return () => window.api.removeAdminUploadProgress();
+    }, []);
+
+    // [v2.4.2] Formatage octets -> Mo/Ko lisible
+    const formatBytes = (bytes: number): string => {
+        if (!bytes || bytes < 1024) return `${bytes || 0} o`;
+        const mb = bytes / (1024 * 1024);
+        if (mb >= 1) return `${mb.toFixed(1)} Mo`;
+        return `${(bytes / 1024).toFixed(0)} Ko`;
+    };
+
+    // [v2.4.2] Formatage durée restante -> "2 min 30 s"
+    const formatEta = (s: number): string => {
+        if (s >= 3600) return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+        if (s >= 60) return `${Math.floor(s / 60)} min ${s % 60} s`;
+        return `${s} s`;
+    };
 
     const fetchFeedback = async () => {
         setIsLoadingFeedback(true);
@@ -174,11 +205,14 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
 
         try {
             const res = await window.api.adminSetLatestVersion(
-                password, 
-                newVersion, 
+                password,
+                newVersion,
                 newUpdateUrl,
                 newExtensionVersion,
-                newExtensionUrl
+                newExtensionUrl,
+                // [v2.4.2] Sans hash publié, les clients refusent la mise à jour (anti-tampering)
+                newUpdateHash.trim() || undefined,
+                newExtensionHash.trim() || undefined
             );
             
             if (res.success) {
@@ -193,6 +227,8 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
 
     const performUpload = async (localPath: string, type: 'setup' | 'extension', fileName: string) => {
         setIsUploading(true);
+        isUploadingRef.current = true;
+        setUploadProgress({ type, percent: 0, uploaded: 0, total: 0 });
         setMessage({ type: 'success', text: `Upload de ${fileName} en cours...` });
 
         try {
@@ -200,8 +236,10 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
             if (res.success && res.url) {
                 if (type === 'setup') {
                     setNewUpdateUrl(res.url);
+                    if (res.hash) setNewUpdateHash(res.hash);
                 } else {
                     setNewExtensionUrl(res.url);
+                    if (res.hash) setNewExtensionHash(res.hash);
                 }
                 setMessage({ type: 'success', text: `${fileName} téléversé, hash SHA-256 publié et configuré !` });
             } else {
@@ -210,7 +248,23 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
         } catch (error) {
             setMessage({ type: 'error', text: 'Erreur technique lors de l\'upload.' });
         } finally {
+            isUploadingRef.current = false;
             setIsUploading(false);
+            setUploadProgress(null);
+        }
+    };
+
+    // [v2.4.2] SHA-256 d'un fichier local sans upload — pour un setup hébergé
+    // ailleurs (ex. GitHub Releases) publié via le champ « Lien Direct »
+    const handleHashLocalFile = async (type: 'setup' | 'extension') => {
+        const res = await window.api.adminHashLocalFile(type);
+        if (!res) return; // dialogue annulé
+        if (res.hash) {
+            if (type === 'setup') setNewUpdateHash(res.hash);
+            else setNewExtensionHash(res.hash);
+            setMessage({ type: 'success', text: `SHA-256 de ${res.fileName} calculé. Publiez pour le diffuser.` });
+        } else {
+            setMessage({ type: 'error', text: res.error || 'Erreur de calcul du hash.' });
         }
     };
 
@@ -634,8 +688,43 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                         </div>
                                     </div>
 
+                                    {/* [v2.4.2] Barre de progression de l'upload */}
+                                    {uploadProgress && (
+                                        <div className={`mt-4 p-3 rounded-lg border ${uploadProgress.type === 'setup' ? 'bg-blue-500/5 border-blue-500/20' : 'bg-indigo-500/5 border-indigo-500/20'}`}>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <span className={`text-[10px] font-bold uppercase flex items-center gap-1.5 ${uploadProgress.type === 'setup' ? 'text-blue-300' : 'text-indigo-300'}`}>
+                                                    <UploadCloud className="w-3.5 h-3.5 animate-pulse" />
+                                                    {uploadProgress.type === 'setup' ? 'Envoi du Setup (.exe)' : 'Envoi de l\'Extension (.zip)'}
+                                                </span>
+                                                <span className={`text-xs font-black ${uploadProgress.type === 'setup' ? 'text-blue-200' : 'text-indigo-200'}`}>
+                                                    {uploadProgress.percent}%
+                                                </span>
+                                            </div>
+                                            <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full rounded-full transition-all duration-200 ${uploadProgress.type === 'setup' ? 'bg-blue-500' : 'bg-indigo-500'}`}
+                                                    style={{ width: `${uploadProgress.percent}%` }}
+                                                />
+                                            </div>
+                                            <div className="flex items-center justify-between mt-1.5">
+                                                <span className="text-[9px] text-white/40">
+                                                    {uploadProgress.total > 0
+                                                        ? `${formatBytes(uploadProgress.uploaded)} / ${formatBytes(uploadProgress.total)}${uploadProgress.speed ? ` • ${formatBytes(uploadProgress.speed)}/s` : ''}`
+                                                        : 'Préparation...'}
+                                                </span>
+                                                <span className="text-[9px] text-white/40">
+                                                    {uploadProgress.percent >= 100
+                                                        ? 'Finalisation (hash + config)...'
+                                                        : uploadProgress.etaSeconds
+                                                            ? `≈ ${formatEta(uploadProgress.etaSeconds)} restant`
+                                                            : 'Ne fermez pas cette fenêtre'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="space-y-4 pt-2">
-                                        
+
                                         <div className="grid grid-cols-2 gap-4">
                                             {/* SETUP Mises à jour */}
                                             <div className="space-y-2 p-3 bg-black/20 rounded-lg border border-blue-500/10">
@@ -656,6 +745,24 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                                     value={newUpdateUrl}
                                                     onChange={(e) => setNewUpdateUrl(e.target.value)}
                                                     placeholder="Lien auto..."
+                                                    className="w-full px-3 py-2 bg-black/40 text-blue-100 border border-blue-500/20 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none mb-2"
+                                                />
+
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[9px] text-blue-300/70 uppercase">SHA-256 (.exe)</span>
+                                                    <button
+                                                        onClick={() => handleHashLocalFile('setup')}
+                                                        className="text-[9px] text-blue-400 hover:text-blue-300 underline"
+                                                        title="Calcule le hash d'un .exe local sans l'uploader (lien manuel, ex. GitHub Releases)"
+                                                    >
+                                                        Hash fichier local
+                                                    </button>
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    value={newUpdateHash}
+                                                    onChange={(e) => setNewUpdateHash(e.target.value)}
+                                                    placeholder="Hash auto..."
                                                     className="w-full px-3 py-2 bg-black/40 text-blue-100 border border-blue-500/20 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
                                                 />
                                             </div>
@@ -679,6 +786,24 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                                     value={newExtensionUrl}
                                                     onChange={(e) => setNewExtensionUrl(e.target.value)}
                                                     placeholder="Lien auto..."
+                                                    className="w-full px-3 py-2 bg-black/40 text-indigo-100 border border-indigo-500/20 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none mb-2"
+                                                />
+
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[9px] text-indigo-300/70 uppercase">SHA-256 (.zip)</span>
+                                                    <button
+                                                        onClick={() => handleHashLocalFile('extension')}
+                                                        className="text-[9px] text-indigo-400 hover:text-indigo-300 underline"
+                                                        title="Calcule le hash d'un .zip local sans l'uploader"
+                                                    >
+                                                        Hash fichier local
+                                                    </button>
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    value={newExtensionHash}
+                                                    onChange={(e) => setNewExtensionHash(e.target.value)}
+                                                    placeholder="Hash auto..."
                                                     className="w-full px-3 py-2 bg-black/40 text-indigo-100 border border-indigo-500/20 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
                                                 />
                                             </div>
@@ -689,7 +814,9 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                             disabled={isUploading}
                                             className={`w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all shadow-lg text-xs mt-2 ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         >
-                                            {isUploading ? t.admin.uploading : t.admin.publishUpdate}
+                                            {isUploading
+                                                ? (uploadProgress ? `${t.admin.uploading} ${uploadProgress.percent}%` : t.admin.uploading)
+                                                : t.admin.publishUpdate}
                                         </button>
                                     </div>
 

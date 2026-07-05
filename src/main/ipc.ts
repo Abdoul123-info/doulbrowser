@@ -1055,13 +1055,69 @@ export function registerIpcHandlers(win: BrowserWindow) {
         return { success: false, error: 'Le fichier local n\'existe pas.' }
     }
 
+    // [v2.4.2] Le plan Free de Supabase limite chaque fichier à 50 Mo: inutile de
+    // laisser partir un setup de ~186 Mo (échec garanti après de longues minutes).
+    // Le .exe se publie via GitHub Releases + « Lien Direct » + « Hash fichier local ».
+    const fileSizeMB = fs.statSync(localPath).size / (1024 * 1024)
+    if (fileSizeMB > 49) {
+        return {
+            success: false,
+            error: `Fichier trop lourd pour Supabase Free (${fileSizeMB.toFixed(0)} Mo > 50 Mo). ` +
+                'Hébergez le .exe sur GitHub Releases, collez son lien dans « Lien Direct (.exe) » ' +
+                'puis cliquez « Hash fichier local » pour publier le SHA-256.'
+        }
+    }
+
     const fileHash = sha256File(localPath);
     const uploadTicket = await licenseBackendRequest('admin-create-update-upload', { password, type });
     if (!uploadTicket.success || !uploadTicket.signedUrl || !uploadTicket.publicUrl) {
         return { success: false, error: uploadTicket.error || 'Impossible de preparer l\'upload signe.' }
     }
 
-    const res = await uploadFileToSignedUrl(localPath, uploadTicket.signedUrl, uploadTicket.publicUrl, uploadTicket.token);
+    // [v2.4.2] Progression de l'upload -> renderer (throttle au changement de 1%)
+    // - Monotone: ne recule jamais (si une 2e méthode d'upload est tentée en secours,
+    //   la barre ne "recommence" pas à 0 puis 100 -> plus de double 100% visible).
+    // - 100% réservé à la confirmation serveur (done=true): évite un faux 100%
+    //   pendant que les octets sont encore en transit.
+    const progressWin = BrowserWindow.fromWebContents(_event.sender)
+    let lastPercentSent = -1
+    let maxPercent = 0
+    // [v2.4.2] Plus aucun événement après le verdict (évite une barre fantôme
+    // ré-affichée par un event IPC retardataire après l'erreur/le succès)
+    let uploadSettled = false
+    // [v2.4.2] Vitesse lissée (moyenne mobile exponentielle) + temps restant estimé
+    let lastSampleTime = Date.now()
+    let lastSampleBytes = 0
+    let smoothedSpeed = 0 // octets/s
+    const onProgress = (uploaded: number, total: number, done?: boolean) => {
+        if (uploadSettled) return
+        if (!progressWin || progressWin.isDestroyed()) return
+        let percent = total > 0 ? Math.round((uploaded / total) * 100) : 0
+        if (!done) percent = Math.min(percent, 99)
+        percent = Math.max(percent, maxPercent)
+        if (done) percent = 100
+        maxPercent = percent
+        if (percent === lastPercentSent) return
+        const now = Date.now()
+        const dt = (now - lastSampleTime) / 1000
+        if (dt > 0.05) {
+            const inst = Math.max(uploaded - lastSampleBytes, 0) / dt
+            smoothedSpeed = smoothedSpeed > 0 ? smoothedSpeed * 0.7 + inst * 0.3 : inst
+            lastSampleTime = now
+            lastSampleBytes = uploaded
+        }
+        const etaSeconds = !done && smoothedSpeed > 1024
+            ? Math.round((total - uploaded) / smoothedSpeed)
+            : 0
+        lastPercentSent = percent
+        safeSend(progressWin, 'admin-upload-progress', {
+            type, uploaded, total, percent,
+            speed: Math.round(smoothedSpeed), etaSeconds
+        })
+    }
+
+    const res = await uploadFileToSignedUrl(localPath, uploadTicket.signedUrl, uploadTicket.publicUrl, uploadTicket.token, onProgress);
+    uploadSettled = true
 
     if (res.success && res.url) {
         await licenseBackendRequest('admin-set-latest-version', {
@@ -1078,8 +1134,8 @@ export function registerIpcHandlers(win: BrowserWindow) {
 
   // [v1.9.33] Select local file via Dialog
   ipcMain.handle('admin-select-update-file', async (_event, type: 'setup' | 'extension') => {
-    const filters = type === 'setup' 
-        ? [{ name: 'Applications', extensions: ['exe'] }] 
+    const filters = type === 'setup'
+        ? [{ name: 'Applications', extensions: ['exe'] }]
         : [{ name: 'Archives Extension', extensions: ['zip'] }];
 
     const result = await dialog.showOpenDialog({
@@ -1091,6 +1147,27 @@ export function registerIpcHandlers(win: BrowserWindow) {
         return result.filePaths[0];
     }
     return null;
+  })
+
+  // [v2.4.2] SHA-256 d'un fichier local SANS upload — pour publier un setup
+  // hébergé ailleurs (ex. GitHub Releases) via le champ « Lien Direct »
+  ipcMain.handle('admin-hash-local-file', async (_event, type: 'setup' | 'extension') => {
+    const filters = type === 'setup'
+        ? [{ name: 'Applications', extensions: ['exe'] }]
+        : [{ name: 'Archives Extension', extensions: ['zip'] }];
+
+    const result = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        filters: filters
+    });
+
+    if (result.canceled || result.filePaths.length === 0) return null;
+    try {
+        const filePath = result.filePaths[0];
+        return { hash: sha256File(filePath), fileName: filePath.split(/[\\/]/).pop() };
+    } catch (e: any) {
+        return { error: `Erreur de calcul du hash: ${e.message}` };
+    }
   })
 
 

@@ -64,7 +64,10 @@ export interface DownloadAPI {
   adminGetAllLicenses: (password: string) => Promise<{ success: boolean, licenses: any[], error?: string }>
   adminUpdateLicenseStatus: (password: string, targetMid: string, isBlocked: boolean) => Promise<{ success: boolean, error?: string }>
   adminUploadUpdateFile: (password: string, localPath: string, type: 'setup' | 'extension') => Promise<{ success: boolean, url?: string, hash?: string, error?: string }>
+  onAdminUploadProgress: (callback: (event: any, data: { type: 'setup' | 'extension', uploaded: number, total: number, percent: number, speed?: number, etaSeconds?: number }) => void) => void
+  removeAdminUploadProgress: () => void
   adminSelectUpdateFile: (type: 'setup' | 'extension') => Promise<string | null>
+  adminHashLocalFile: (type: 'setup' | 'extension') => Promise<{ hash?: string, fileName?: string, error?: string } | null>
   getAppVersion: () => Promise<string>
   checkAppUpdate: () => Promise<{ updateAvailable: boolean, latestVersion?: string, currentVersion?: string, downloadUrl?: string, updateHash?: string }>
   adminSetLatestVersion: (password: string, newVersion: string, downloadUrl?: string, extensionVersion?: string, extensionUrl?: string, updateHash?: string, extensionHash?: string) => Promise<{ success: boolean, error?: string }>

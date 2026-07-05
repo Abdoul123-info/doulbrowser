@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { DownloadList } from './components/DownloadList';
 import { SettingsModal } from './components/SettingsModal';
@@ -87,9 +87,26 @@ export default function App() {
   }, []);
 
 
-  const handleTaskStateUpdate = (type: string, state: { status: string; progress: number }) => {
-    setMinimizedTasks(prev => ({ ...prev, [type]: state }));
-  };
+  // [v2.4.2] FIX boucle "Maximum update depth exceeded":
+  // 1) useCallback -> identité stable (avant: nouvelle fonction à chaque rendu,
+  //    or les modals ont onReportState dans les deps de leur useEffect)
+  // 2) bail-out si l'état est identique -> même référence, pas de re-rendu
+  const handleTaskStateUpdate = useCallback((type: string, state: { status: string; progress: number }) => {
+    setMinimizedTasks(prev => {
+      const cur = prev[type];
+      if (cur && cur.status === state.status && cur.progress === state.progress) return prev;
+      return { ...prev, [type]: state };
+    });
+  }, []);
+
+  const reportConverterState = useCallback(
+    (s: { status: string; progress: number }) => handleTaskStateUpdate('converter', s),
+    [handleTaskStateUpdate]
+  );
+  const reportCompressorState = useCallback(
+    (s: { status: string; progress: number }) => handleTaskStateUpdate('compressor', s),
+    [handleTaskStateUpdate]
+  );
 
   return (
     <>
@@ -131,7 +148,7 @@ export default function App() {
             }}
             isMinimized={!!minimizedTasks.converter && !isConverterOpen}
             onMinimize={() => setIsConverterOpen(false)}
-            onReportState={(s) => handleTaskStateUpdate('converter', s)}
+            onReportState={reportConverterState}
           />
           <VideoCompressorModal
             isOpen={isCompressorOpen}
@@ -141,7 +158,7 @@ export default function App() {
             }}
             isMinimized={!!minimizedTasks.compressor && !isCompressorOpen}
             onMinimize={() => setIsCompressorOpen(false)}
-            onReportState={(s) => handleTaskStateUpdate('compressor', s)}
+            onReportState={reportCompressorState}
           />
           <BatchDownloadModal
             isOpen={isBatchOpen}

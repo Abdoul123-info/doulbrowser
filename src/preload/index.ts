@@ -37,7 +37,12 @@ const api = {
   adminGetAllLicenses: (password: string) => ipcRenderer.invoke('admin-get-all-licenses', password),
   adminUpdateLicenseStatus: (password: string, targetMid: string, isBlocked: boolean) => ipcRenderer.invoke('admin-update-license-status', password, targetMid, isBlocked),
   adminUploadUpdateFile: (password: string, localPath: string, type: 'setup' | 'extension') => ipcRenderer.invoke('admin-upload-update-file', password, localPath, type),
+  // [v2.4.2] Progression de l'upload admin (setup/extension)
+  onAdminUploadProgress: (callback: (event: any, data: any) => void) => ipcRenderer.on('admin-upload-progress', callback),
+  removeAdminUploadProgress: () => ipcRenderer.removeAllListeners('admin-upload-progress'),
   adminSelectUpdateFile: (type: 'setup' | 'extension') => ipcRenderer.invoke('admin-select-update-file', type),
+  // [v2.4.2] Hash SHA-256 d'un fichier local sans upload (publication via lien manuel)
+  adminHashLocalFile: (type: 'setup' | 'extension') => ipcRenderer.invoke('admin-hash-local-file', type),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
   adminSetLatestVersion: (password, newVersion, downloadUrl, extensionVersion, extensionUrl, updateHash, extensionHash) => ipcRenderer.invoke('admin-set-latest-version', password, newVersion, downloadUrl, extensionVersion, extensionUrl, updateHash, extensionHash),

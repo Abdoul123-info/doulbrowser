@@ -1,5 +1,5 @@
 import { X, FileVideo, Minimize2, CheckCircle2, AlertCircle, Loader2, ArrowRight, Share2 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from '../utils/i18n';
 
@@ -42,19 +42,25 @@ export function VideoCompressorModal({ isOpen, onClose, isMinimized, onMinimize,
     }, []);
 
     // Report state to parent for BackgroundTasks pill
+    // [v2.4.2] FIX boucle "Maximum update depth exceeded": le callback passe par
+    // une ref et SORT des deps de l'effet — sinon un onReportState inline (nouvelle
+    // identité à chaque rendu du parent) redéclenchait l'effet en cascade infinie.
+    const onReportStateRef = useRef(onReportState);
+    onReportStateRef.current = onReportState;
     useEffect(() => {
-        if (onReportState) {
+        const report = onReportStateRef.current;
+        if (report) {
             let reportedStatus = 'active';
             if (status === 'idle') reportedStatus = 'idle';
             else if (status === 'success') reportedStatus = 'success';
             else if (status === 'error') reportedStatus = 'error';
 
-            onReportState({
+            report({
                 status: reportedStatus,
                 progress
             });
         }
-    }, [status, progress, onReportState]);
+    }, [status, progress]);
 
     const handleSelectFile = async () => {
         try {

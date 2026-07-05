@@ -135,12 +135,15 @@ export async function uploadFileToSignedUrl(
   localPath: string,
   signedUrl: string,
   publicUrl: string,
-  uploadToken?: string
+  uploadToken?: string,
+  // [v2.4.2] Callback de progression: (octets envoyés, taille totale, terminé=confirmé serveur)
+  onProgress?: (uploaded: number, total: number, done?: boolean) => void
 ): Promise<{ success: boolean; url?: string; error?: string; code?: number }> {
   if (!signedUrl) return { success: false, error: 'URL upload signée manquante.' }
 
   try {
-    const fileContent = fs.readFileSync(localPath)
+    // [v2.4.2] On streame le fichier au lieu de tout charger en RAM (setup ~186 Mo)
+    const totalSize = fs.statSync(localPath).size
     // [v2.4.1] Les URLs signées relatives (storage-js v1) omettent /storage/v1
     let normalizedUrl = signedUrl
     if (!normalizedUrl.startsWith('http')) {
@@ -170,7 +173,7 @@ export async function uploadFileToSignedUrl(
           apikey: SUPABASE_KEY,
           Authorization: `Bearer ${SUPABASE_KEY}`,
           'Content-Type': 'application/octet-stream',
-          'Content-Length': fileContent.length
+          'Content-Length': totalSize
         }
       }
 
@@ -179,6 +182,8 @@ export async function uploadFileToSignedUrl(
         res.on('data', (chunk) => (data += chunk))
         res.on('end', () => {
           if (res.statusCode === 200 || res.statusCode === 201) {
+            // [v2.4.2] 100% réservé à la confirmation serveur (done=true)
+            if (onProgress) onProgress(totalSize, totalSize, true)
             resolve({ success: true, url: publicUrl })
           } else {
             resolve({
@@ -191,16 +196,45 @@ export async function uploadFileToSignedUrl(
       })
 
       req.on('error', (e) => resolve({ success: false, error: `Erreur réseau: ${e.message}` }))
-      req.write(fileContent)
-      req.end()
+      // [v2.4.2] Connexion morte: on coupe après 90 s sans activité socket
+      // (l'erreur remonte via req.on('error') -> plus de barre figée sans fin)
+      req.setTimeout(90000, () => req.destroy(new Error('aucune activité réseau depuis 90 s')))
+
+      // [v2.4.2] Envoi manuel chunk par chunk: un octet n'est compté qu'une fois
+      // vidé vers le réseau (callback de write). Avant, pipe() comptait la LECTURE
+      // DISQUE (~177 Mo/s affichés): tout le fichier partait en RAM et la barre
+      // montrait 99% pendant que le vrai envoi rampait en arrière-plan.
+      let flushed = 0
+      const fileStream = fs.createReadStream(localPath, { highWaterMark: 256 * 1024 })
+      fileStream.on('data', (chunk) => {
+        const size = typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+        const ok = req.write(chunk, () => {
+          flushed += size
+          if (onProgress) onProgress(flushed, totalSize, false)
+        })
+        if (!ok) {
+          fileStream.pause()
+          req.once('drain', () => fileStream.resume())
+        }
+      })
+      fileStream.on('end', () => req.end())
+      fileStream.on('error', (e) => {
+        req.destroy()
+        resolve({ success: false, error: `Erreur lecture fichier: ${e.message}` })
+      })
     })
 
-    const putResult = await attemptUpload('PUT')
-    if (putResult.success || (putResult.code !== 400 && putResult.code !== 405)) {
-      return putResult
+    // [v2.4.2] On envoie le corps UNE seule fois: la méthode acceptée d'abord.
+    // Symptôme observé: PUT renvoyait 405 (méthode refusée) puis POST réussissait,
+    // d'où un double upload de 186 Mo. On tente donc POST en premier; si jamais ce
+    // backend exige PUT (400/405), on bascule en secours. Une seule des deux
+    // téléverse réellement le corps qui réussit.
+    const firstResult = await attemptUpload('POST')
+    if (firstResult.success || (firstResult.code !== 400 && firstResult.code !== 405)) {
+      return firstResult
     }
 
-    return await attemptUpload('POST')
+    return await attemptUpload('PUT')
   } catch (e: any) {
     return { success: false, error: `Erreur fichier local: ${e.message}` }
   }
