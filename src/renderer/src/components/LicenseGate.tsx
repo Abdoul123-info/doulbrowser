@@ -17,6 +17,10 @@ export function LicenseGate({ onActivated }: LicenseGateProps) {
         type: 'idle',
         message: ''
     });
+    // [v2.4.2] Achat en ligne (boutique MoneyFusion) + activation automatique
+    const STORE_URL = 'https://abdoul123-info.github.io/doulget-store';
+    const BUY_API = 'https://gqrwykhhqjimsgiqkgut.supabase.co/functions/v1/buy-license';
+    const [waitingPayment, setWaitingPayment] = useState(false);
 
     const handleTitleClick = () => {
         const newCount = logoClicks + 1;
@@ -31,11 +35,31 @@ export function LicenseGate({ onActivated }: LicenseGateProps) {
         setTimeout(() => setLogoClicks(0), 2000);
     };
 
+    // [v2.4.2] Interroge la boutique: une clé payée existe-t-elle pour cette machine ?
+    const checkMachineForKey = async (mid: string): Promise<string | null> => {
+        if (!mid || mid === 'Chargement...' || mid.startsWith('Erreur')) return null;
+        try {
+            const r = await fetch(BUY_API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'check-machine', machineId: mid })
+            });
+            const j = await r.json();
+            return (j && j.success && j.found && j.licenseKey) ? j.licenseKey : null;
+        } catch {
+            return null;
+        }
+    };
+
     useEffect(() => {
         const fetchId = async () => {
             try {
                 const mid = await window.api.getMachineId();
                 setMachineId(mid);
+                // [v2.4.2] Récupération auto: paiement déjà effectué (ex. app relancée
+                // avant la confirmation) -> activation sans rien demander
+                const paidKey = await checkMachineForKey(mid);
+                if (paidKey) activateWithKey(paidKey);
             } catch (e) {
                 setMachineId('Erreur de lecture HWID');
             }
@@ -43,12 +67,31 @@ export function LicenseGate({ onActivated }: LicenseGateProps) {
         fetchId();
     }, []);
 
-    const handleActivate = async () => {
-        if (!key.trim()) return;
+    // [v2.4.2] Pendant l'achat: surveille le paiement puis active tout seul
+    useEffect(() => {
+        if (!waitingPayment) return;
+        const interval = setInterval(async () => {
+            const paidKey = await checkMachineForKey(machineId);
+            if (paidKey) {
+                clearInterval(interval);
+                setWaitingPayment(false);
+                activateWithKey(paidKey);
+            }
+        }, 8000);
+        return () => clearInterval(interval);
+    }, [waitingPayment, machineId]);
 
+    const handleBuy = () => {
+        if (!machineId || machineId === 'Chargement...' || machineId.startsWith('Erreur')) return;
+        window.open(`${STORE_URL}/?mid=${encodeURIComponent(machineId)}`);
+        setWaitingPayment(true);
+    };
+
+    const activateWithKey = async (licenseKey: string) => {
+        setKey(licenseKey);
         setStatus({ type: 'loading', message: 'Vérification de la licence...' });
         try {
-            const res = await window.api.activateLicense(key.trim());
+            const res = await window.api.activateLicense(licenseKey.trim());
             if (res.success) {
                 setStatus({ type: 'success', message: 'Licence activée ! Redémarrage...' });
                 setTimeout(() => {
@@ -60,6 +103,11 @@ export function LicenseGate({ onActivated }: LicenseGateProps) {
         } catch (error) {
             setStatus({ type: 'error', message: 'Erreur de connexion au serveur de licence.' });
         }
+    };
+
+    const handleActivate = async () => {
+        if (!key.trim()) return;
+        await activateWithKey(key.trim());
     };
 
     // [v1.9.22] Admin self-activation: generate a key and activate in one step
@@ -207,16 +255,35 @@ export function LicenseGate({ onActivated }: LicenseGateProps) {
                                     {status.message}
                                 </div>
                             )}
+
+                            {/* [v2.4.2] Attente du paiement boutique -> activation auto */}
+                            {waitingPayment && status.type !== 'success' && status.type !== 'loading' && (
+                                <div className="mt-6 p-4 rounded-xl bg-blue-500/10 text-blue-300 text-sm flex items-center gap-3 animate-in slide-in-from-top-2 duration-300">
+                                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin shrink-0" />
+                                    <span>En attente de votre paiement... L'application s'activera automatiquement dès confirmation.</span>
+                                    <button
+                                        onClick={() => setWaitingPayment(false)}
+                                        className="ml-auto text-blue-400 hover:text-white transition-colors shrink-0"
+                                        title="Annuler l'attente"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                            )}
                         </>
                     )}
                 </div>
 
                 <div className="mt-8 text-center space-y-4">
                     <p className="text-xs text-slate-500">
-                        Vous n'avez pas de clé ? Contactez l'administrateur pour obtenir une licence.
+                        Vous n'avez pas de clé ? Achetez-la en 2 minutes par mobile money.
                     </p>
                     <div className="flex justify-center gap-6">
-                        <a href="#" className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors">
+                        <a
+                            href="#"
+                            onClick={(e) => { e.preventDefault(); handleBuy(); }}
+                            className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
+                        >
                             Acheter une clé <ExternalLink className="w-3 h-3" />
                         </a>
                         <a href="#" className="text-xs text-slate-500 hover:text-white transition-colors">
