@@ -12,7 +12,9 @@ const requestHeadersCache = new Map();
 const tabMetadata = new Map(); // { tabId: { metadata: "S02E05", title: "...", timestamp } }
 
 // [v1.9.3] Update Check Configuration
-const CURRENT_VERSION = '1.9.9';
+// [v2.0.1] Version lue depuis le manifest — la constante codée en dur (1.9.9)
+// faisait afficher un badge "NEW" permanent dès que le manifest la dépassait.
+const CURRENT_VERSION = chrome.runtime.getManifest().version;
 const SUPABASE_UPDATER = {
     // [v1.9.36] Query for both extension_version and extension_url
     url: 'https://gqrwykhhqjimsgiqkgut.supabase.co/rest/v1/app_config?key=in.(extension_version,extension_url)',
@@ -710,6 +712,9 @@ console.log('🚀 DoulGet Background Worker Active (v1.9.3)');
 
 // 5. UPDATE SYSTEM (v1.9.3)
 async function checkExtensionUpdate() {
+    // [v2.0.1] Installée depuis un store (Chrome Web Store / Edge Add-ons):
+    // update_url est défini et le store gère les mises à jour lui-même.
+    if (chrome.runtime.getManifest().update_url) return;
     try {
         const response = await fetch(SUPABASE_UPDATER.url, {
             headers: {
