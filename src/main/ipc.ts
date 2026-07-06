@@ -696,7 +696,9 @@ export function registerIpcHandlers(win: BrowserWindow) {
       if (updated) state.appSettings = updated
       return { success: true, expiry: activation.expiry }
     } else {
-      return { success: false, error: 'Clé invalide ou expirée.' }
+      // Le serveur distingue "clé déjà utilisée ailleurs" de "clé invalide" ;
+      // on relaie son message quand il existe (les erreurs réseau n'en ont pas).
+      return { success: false, error: activation.error || 'Clé invalide ou expirée.' }
     }
   })
 

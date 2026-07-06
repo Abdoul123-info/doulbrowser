@@ -173,15 +173,37 @@ serve(async (req) => {
         await supabase.from("licences").delete().eq("hwid", provisionalId)
       }
 
-      const { error } = await supabase.from("licences").upsert({
-        hwid: machineId,
-        license_key: finalKey,
-        expiry_date: verification.expiry,
-        activated_at: new Date().toISOString(),
-        original_key: key,
-        is_blocked: false,
-        status: "active"
-      })
+      // Verrou premier usage : une clé universelle "B-" n'active qu'UNE machine.
+      // La signature étant valable partout, seul ce contrôle en base empêche
+      // qu'une clé vendue soit partagée. La machine d'origine peut réactiver
+      // librement ; pour transférer la licence, l'admin supprime l'ancienne ligne.
+      if (provisionalId.startsWith("B-")) {
+        const { data: used } = await supabase
+          .from("licences")
+          .select("hwid")
+          .ilike("original_key", key)
+          .neq("hwid", machineId)
+          .limit(1)
+        if (used && used.length > 0) {
+          return json({ success: false, error: "Cette clé a déjà été utilisée sur un autre appareil." })
+        }
+      }
+
+      // onConflict obligatoire : la PK est `id` (auto), l'unicité machine est
+      // portée par `hwid`. Sans lui, toute ré-activation (renouvellement après
+      // expiration, réinstallation) violait la contrainte UNIQUE et échouait.
+      const { error } = await supabase.from("licences").upsert(
+        {
+          hwid: machineId,
+          license_key: finalKey,
+          expiry_date: verification.expiry,
+          activated_at: new Date().toISOString(),
+          original_key: key,
+          is_blocked: false,
+          status: "active"
+        },
+        { onConflict: "hwid" }
+      )
 
       if (error) throw error
       return json({ success: true, key: finalKey, expiry: verification.expiry })
