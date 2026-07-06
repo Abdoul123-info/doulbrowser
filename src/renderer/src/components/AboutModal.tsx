@@ -11,6 +11,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
     const { t } = useTranslation();
     const [version, setVersion] = useState('...');
     const [installStatus, setInstallStatus] = useState<'idle' | 'installing' | 'success' | 'error'>('idle');
+    const [installError, setInstallError] = useState('');
     const [extensionPath, setExtensionPath] = useState('');
     const [browserOpened, setBrowserOpened] = useState(true);
 
@@ -24,6 +25,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
 
     const handleInstallExtension = async () => {
         setInstallStatus('installing');
+        setInstallError('');
         try {
             const res = await window.api.registerExtensionInBrowsers();
             if (res.success) {
@@ -31,10 +33,12 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
                 setBrowserOpened(res.browserOpened !== false);
                 setInstallStatus('success');
             } else {
+                setInstallError(res.error || '');
                 setInstallStatus('error');
             }
         } catch (e) {
             console.error('[About] Registration failed:', e);
+            setInstallError(e instanceof Error ? e.message : '');
             setInstallStatus('error');
         }
     };
@@ -125,9 +129,17 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
                             )}
 
                             {installStatus === 'error' && (
-                                <p className="text-red-400 text-[10px] mt-2 text-center">
-                                    {t.autoInstall.error}
-                                </p>
+                                <div className="mt-2 text-center space-y-1">
+                                    <p className="text-red-400 text-[10px]">{t.autoInstall.error}</p>
+                                    {installError && (
+                                        <p className="text-red-300/80 text-[10px] font-mono break-all select-all">
+                                            {installError}
+                                        </p>
+                                    )}
+                                    <p className="text-gray-400 text-[10px] italic">
+                                        Vérifiez que votre antivirus ne bloque pas DoulGet, puis réessayez.
+                                    </p>
+                                </div>
                             )}
                         </div>
 
