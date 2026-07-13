@@ -1554,15 +1554,26 @@ export function registerIpcHandlers(win: BrowserWindow) {
 
   // Helper function to resolve the extension source folder
   function getExtensionSourcePath(): string {
-    let path = join(app.getAppPath(), 'Extension_DoulGet')
-    if (fs.existsSync(path)) return path
-    
-    path = join(app.getAppPath(), '..', 'app.asar.unpacked', 'Extension_DoulGet')
-    if (fs.existsSync(path)) return path
-    
-    path = join(app.getAppPath(), '..', 'Extension_DoulGet')
-    if (fs.existsSync(path)) return path
-
+    // [v2.4.3] FIX « ENOENT opendir » à l'installation de l'extension sur une machine
+    // où l'app est INSTALLÉE : Extension_DoulGet est listé dans app.asar (existsSync
+    // répond "oui") mais son contenu réel vit dans app.asar.unpacked. Copier depuis le
+    // chemin asar virtuel fait échouer cpSync/opendir. On ne retient donc qu'un dossier
+    // RÉELLEMENT ouvrable (readdirSync), en priorisant l'unpacked (prod) puis le dev.
+    const candidates = [
+      join(process.resourcesPath || '', 'app.asar.unpacked', 'Extension_DoulGet'),
+      join(app.getAppPath(), '..', 'app.asar.unpacked', 'Extension_DoulGet'),
+      join(app.getAppPath(), 'Extension_DoulGet'),
+      join(app.getAppPath(), '..', 'Extension_DoulGet')
+    ]
+    for (const p of candidates) {
+      if (!p) continue
+      try {
+        fs.readdirSync(p) // vrai dossier lisible, pas un chemin asar virtuel
+        return p
+      } catch {
+        /* chemin inexistant ou non ouvrable (asar) : on essaie le suivant */
+      }
+    }
     return ''
   }
 
