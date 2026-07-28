@@ -72,16 +72,22 @@ function makeKey(machineId: string | null, days: number): string {
 }
 
 // Verification du paiement AUPRES de MoneyFusion (jamais confiance au webhook seul)
+// SANS "www." : le certificat TLS de MoneyFusion ne couvre que pay.moneyfusion.net —
+// avec le prefixe, TOUTE verification echouait (NotValidForName) et aucune cle
+// n'etait jamais generee. Decouvert au premier paiement reel, le 27/07/2026.
 async function verifyPayment(token: string): Promise<{ paid: boolean; failed: boolean; amount: number }> {
-  const res = await fetch(`https://www.pay.moneyfusion.net/paiementNotif/${encodeURIComponent(token)}`)
+  const res = await fetch(`https://pay.moneyfusion.net/paiementNotif/${encodeURIComponent(token)}`)
   const j = await res.json().catch(() => null)
   const d = (j && (j.data || j)) || {}
   const st = String(d.statut ?? d.status ?? "").toLowerCase()
-  const amount = Number(d.Montant ?? d.montant ?? d.amount ?? 0)
+  // "Montant" est NET des frais MoneyFusion (paiement reel de 1500 → Montant 1455,
+  // frais 45) : sans les additionner, l'anti-fraude rejetait tout paiement honnete.
+  const net = Number(d.Montant ?? d.montant ?? d.amount ?? 0)
+  const fees = Number(d.frais ?? 0)
   return {
     paid: st === "paid",
     failed: st === "failure" || st === "no paid" || st === "cancelled" || st === "echec",
-    amount
+    amount: net + fees
   }
 }
 
