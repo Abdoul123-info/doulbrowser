@@ -64,8 +64,12 @@ function computeExpiry(durationDays: string | number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
 }
 
-function verifyLicense(key: string, machineId: string): { valid: boolean; expiry: string | null } {
-  if (!key) return { valid: false, expiry: null }
+// `reason` sert uniquement à afficher au client un message qui l'aide, au lieu du
+// fourre-tout « Clé invalide ou expirée » : OTHER_DEVICE, EXPIRED, BLOCKED, INVALID.
+type Verification = { valid: boolean; expiry: string | null; reason?: string }
+
+function verifyLicense(key: string, machineId: string): Verification {
+  if (!key) return { valid: false, expiry: null, reason: "INVALID" }
 
   const cleanKey = key.trim().toUpperCase()
 
@@ -79,22 +83,26 @@ function verifyLicense(key: string, machineId: string): { valid: boolean; expiry
     if (parts.length === 4 && parts[0].length === 16) {
       const [raw16, hwid, expiry, hash] = parts
       const expectedHash = md5(raw16 + hwid + expiry + LICENSE_SALT)
+      if (hash !== expectedHash) return { valid: false, expiry: null, reason: "INVALID" }
+      if (hwid !== machineId) return { valid: false, expiry: null, reason: "OTHER_DEVICE" }
       const expiryDate = new Date(expiry)
-      if (hash === expectedHash && hwid === machineId && !Number.isNaN(expiryDate.getTime()) && new Date() <= expiryDate) {
-        return { valid: true, expiry }
-      }
-      return { valid: false, expiry: null }
+      if (Number.isNaN(expiryDate.getTime())) return { valid: false, expiry: null, reason: "INVALID" }
+      if (new Date() > expiryDate) return { valid: false, expiry: null, reason: "EXPIRED" }
+      return { valid: true, expiry }
     }
 
     if (parts.length === 3) {
       const [id, expiry, hash] = parts
       const expectedHash = md5(`${id}:${expiry}:${LICENSE_SALT}`).substring(0, 16)
+      if (hash !== expectedHash) return { valid: false, expiry: null, reason: "INVALID" }
+      if (id !== machineId && !id.startsWith("B-")) return { valid: false, expiry: null, reason: "OTHER_DEVICE" }
       const expiryDate = new Date(expiry)
-      if (hash === expectedHash && (id === machineId || id.startsWith("B-")) && !Number.isNaN(expiryDate.getTime()) && new Date() <= expiryDate) {
-        return { valid: true, expiry }
-      }
+      if (Number.isNaN(expiryDate.getTime())) return { valid: false, expiry: null, reason: "INVALID" }
+      if (new Date() > expiryDate) return { valid: false, expiry: null, reason: "EXPIRED" }
+      return { valid: true, expiry }
     }
-    return { valid: false, expiry: null }
+
+    return { valid: false, expiry: null, reason: "INVALID" }
   }
 
   const rawKey = cleanKey.replace(/-/g, "")
@@ -114,7 +122,7 @@ function verifyLicense(key: string, machineId: string): { valid: boolean; expiry
     }
   }
 
-  return { valid: false, expiry: null }
+  return { valid: false, expiry: null, reason: "INVALID" }
 }
 
 serve(async (req) => {
@@ -136,27 +144,58 @@ serve(async (req) => {
       const key = String(body.key || "").trim()
       let verification = verifyLicense(key, machineId)
 
-      // Fallback base de données : si la vérification cryptographique échoue,
-      // on accepte tout de même une clé qui existe déjà comme enregistrement
-      // actif dans la table `licences` (ex. clé insérée/importée manuellement).
+      // Repli base de données : si la vérification cryptographique échoue, on
+      // accepte une clé déjà enregistrée dans `licences` (ex. clé insérée ou
+      // importée manuellement) — MAIS jamais pour un autre appareil.
+      //
+      // Ce repli cherchait la clé sans regarder le hwid : dès qu'un client
+      // activait la sienne, elle existait en base et le repli la validait pour
+      // n'importe quelle machine. On n'accepte donc que la ligne appartenant DÉJÀ
+      // à cette machine (ré-activation après réinstallation) ou une ligne
+      // provisoire "B-" pas encore reliée à un appareil.
       if (!verification.valid) {
-        const { data: dbLicense } = await supabase
+        const { data: dbRows } = await supabase
           .from("licences")
-          .select("expiry_date,is_blocked,status")
+          .select("hwid,expiry_date,is_blocked,status")
           .eq("license_key", key.toUpperCase())
-          .maybeSingle()
 
-        if (dbLicense && !dbLicense.is_blocked && dbLicense.status !== "blocked") {
+        const dbLicense = (dbRows || []).find(
+          (r) => String(r.hwid || "").toUpperCase() === machineId || String(r.hwid || "").startsWith("B-")
+        )
+
+        if (dbLicense) {
           const expiryDate = dbLicense.expiry_date ? new Date(dbLicense.expiry_date) : null
           const notExpired = !expiryDate || (!Number.isNaN(expiryDate.getTime()) && new Date() <= expiryDate)
-          if (notExpired) {
+          if (dbLicense.is_blocked || dbLicense.status === "blocked") {
+            verification = { valid: false, expiry: null, reason: "BLOCKED" }
+          } else if (!notExpired) {
+            verification = { valid: false, expiry: null, reason: "EXPIRED" }
+          } else {
             verification = { valid: true, expiry: dbLicense.expiry_date }
           }
+        } else if ((dbRows || []).length > 0) {
+          // La clé existe bien, mais elle est rattachée à un autre appareil.
+          verification = { valid: false, expiry: null, reason: "OTHER_DEVICE" }
         }
       }
 
-      if (!machineId || !verification.valid || !verification.expiry) {
-        return json({ success: false, error: "Clé invalide ou expirée." })
+      if (!machineId) {
+        return json({ success: false, error: "Identifiant d'appareil introuvable. Redémarrez l'application." })
+      }
+
+      if (!verification.valid || !verification.expiry) {
+        const messages: Record<string, string> = {
+          OTHER_DEVICE:
+            "Cette clé est déjà utilisée sur un autre appareil. Chaque clé n'active qu'un seul appareil.",
+          EXPIRED: "Cette clé a expiré. Contactez le vendeur pour la renouveler.",
+          BLOCKED: "Cette clé a été désactivée. Contactez le vendeur."
+        }
+        return json({
+          success: false,
+          error:
+            messages[verification.reason || ""] ||
+            "Clé invalide. Vérifiez que vous l'avez saisie correctement, sans espace."
+        })
       }
 
       const finalKey =
@@ -173,11 +212,26 @@ serve(async (req) => {
         await supabase.from("licences").delete().eq("hwid", provisionalId)
       }
 
-      // Verrou premier usage : une clé universelle "B-" n'active qu'UNE machine.
-      // La signature étant valable partout, seul ce contrôle en base empêche
-      // qu'une clé vendue soit partagée. La machine d'origine peut réactiver
+      // Verrou premier usage : une clé n'active qu'UNE machine, quel que soit son
+      // format. Ce contrôle ne visait que les clés universelles "B-", ce qui
+      // laissait les clés liées à un appareil sans aucun verrou : combiné au repli
+      // base de données ci-dessus, une clé déjà activée pouvait l'être une
+      // seconde fois sur un autre appareil. La machine d'origine peut réactiver
       // librement ; pour transférer la licence, l'admin supprime l'ancienne ligne.
-      if (provisionalId.startsWith("B-")) {
+      // La clé maître est volontairement universelle (dépannage admin) : elle seule
+      // échappe au verrou, sinon elle cesserait de fonctionner dès la 2e machine.
+      const isMaster = !!MASTER_LICENSE_KEY && key.trim().toUpperCase() === MASTER_LICENSE_KEY
+
+      // Une clé qui CONTIENT l'identifiant de cette machine porte déjà son verrou
+      // dans sa signature : inutile de la confronter à la base. Sans cette
+      // exception, un client victime d'une clé volée ne pouvait plus réactiver la
+      // sienne — la ligne du fraudeur déclenchait le verrou contre lui.
+      // Positions de l'identifiant : 1re pour `HWID#expiry#hash`, 2e pour l'ancien
+      // format `RAW16#HWID#expiry#hash`.
+      const keyParts = key.trim().toUpperCase().split("#")
+      const boundToThisMachine = keyParts[0] === machineId || keyParts[1] === machineId
+
+      if (!isMaster && !boundToThisMachine) {
         const { data: used } = await supabase
           .from("licences")
           .select("hwid")
@@ -185,7 +239,10 @@ serve(async (req) => {
           .neq("hwid", machineId)
           .limit(1)
         if (used && used.length > 0) {
-          return json({ success: false, error: "Cette clé a déjà été utilisée sur un autre appareil." })
+          return json({
+            success: false,
+            error: "Cette clé est déjà utilisée sur un autre appareil. Chaque clé n'active qu'un seul appareil."
+          })
         }
       }
 
@@ -211,15 +268,77 @@ serve(async (req) => {
 
     if (action === "ping-license") {
       const machineId = String(body.machineId || "").trim().toUpperCase()
+      if (!machineId) return json({ success: false, status: "NOT_FOUND" })
       const lastSeen = body.lastSeen || new Date().toISOString()
-      const { data, error } = await supabase.from("licences").select("is_blocked,expiry_date").eq("hwid", machineId).maybeSingle()
+      const nowIso = new Date().toISOString()
+
+      // Ancre d'essai : le serveur retient la date la PLUS ANCIENNE qu'il connaisse
+      // pour cet appareil. Envoyer une date plus récente ne rapporte donc rien, et
+      // une date plus ancienne ne fait que raccourcir son propre essai : une app
+      // modifiée ne peut pas s'octroyer d'essai supplémentaire par ce canal.
+      //
+      // Jamais bloquant : si `devices` est indisponible, la vérification de licence
+      // doit continuer à répondre. On renvoie alors la date du jour, et l'app
+      // retombe sur sa date d'installation locale.
+      let firstSeen = nowIso
+      try {
+        const li = String(body.localInstall || "").trim()
+        const liMs = li ? new Date(li).getTime() : Number.NaN
+        const candidate =
+          !Number.isNaN(liMs) && liMs > 0 && liMs <= Date.now()
+            ? new Date(liMs).toISOString()
+            : nowIso
+
+        await supabase.from("devices").upsert(
+          { hwid: machineId, first_seen: candidate, last_seen: nowIso },
+          { onConflict: "hwid", ignoreDuplicates: true }
+        )
+
+        const { data: dev } = await supabase
+          .from("devices")
+          .select("first_seen")
+          .eq("hwid", machineId)
+          .maybeSingle()
+
+        firstSeen = dev?.first_seen || candidate
+
+        if (dev && new Date(candidate) < new Date(dev.first_seen)) {
+          await supabase.from("devices")
+            .update({ first_seen: candidate, last_seen: nowIso })
+            .eq("hwid", machineId)
+          firstSeen = candidate
+        } else if (dev) {
+          await supabase.from("devices").update({ last_seen: nowIso }).eq("hwid", machineId)
+        }
+      } catch (_) {
+        // table indisponible : on garde nowIso
+      }
+
+      const { data, error } = await supabase
+        .from("licences")
+        .select("is_blocked,expiry_date,license_key")
+        .eq("hwid", machineId)
+        .maybeSingle()
       if (error) throw error
-      if (!data) return json({ success: false, status: "NOT_FOUND" })
-      if (data.is_blocked) return json({ success: false, status: "BLOCKED" })
-      if (data.expiry_date && new Date(data.expiry_date) < new Date()) return json({ success: false, status: "EXPIRED" })
+      // `serverNow` : heure de référence. L'essai se calculait sur l'horloge du
+      // téléphone, qu'il suffisait de reculer dans les réglages Android pour le
+      // relancer indéfiniment. L'application retient désormais la date la plus
+      // avancée qu'elle ait vue, et celle du serveur fait autorité.
+      if (!data) return json({ success: false, status: "NOT_FOUND", firstSeen, serverNow: nowIso })
+      if (data.is_blocked) return json({ success: false, status: "BLOCKED", firstSeen, serverNow: nowIso })
+      if (data.expiry_date && new Date(data.expiry_date) < new Date()) {
+        return json({ success: false, status: "EXPIRED", firstSeen, serverNow: nowIso })
+      }
 
       await supabase.from("licences").update({ last_seen: lastSeen }).eq("hwid", machineId)
-      return json({ success: true, status: "FOUND" })
+      return json({
+        success: true,
+        status: "FOUND",
+        firstSeen,
+        serverNow: nowIso,
+        licenseKey: data.license_key,
+        expiry: data.expiry_date
+      })
     }
 
     const adminActions = new Set([
@@ -230,7 +349,8 @@ serve(async (req) => {
       "admin-delete-license-cloud",
       "admin-set-latest-version",
       "admin-create-update-upload",
-      "admin-get-feedback"
+      "admin-get-feedback",
+      "admin-set-announce"
     ])
 
     if (adminActions.has(action) && !checkAdminPassword(String(body.password || ""))) {
@@ -348,6 +468,45 @@ serve(async (req) => {
       const { data, error } = await supabase.from("feedback").select("*").order("created_at", { ascending: false })
       if (error) throw error
       return json({ success: true, feedback: data || [] })
+    }
+
+    // [v2.4.5] Annonce aux utilisateurs mobiles : stockée dans app_config (clé "announce",
+    // JSON {id,title,body,url}). Les téléphones la lisent en anon et la notifient une fois
+    // (dédupliquée par id). Titre+message vides = effacer l'annonce.
+    if (action === "admin-set-announce") {
+      const title = String(body.title || "").trim()
+      const message = String(body.message || "").trim()
+      const url = String(body.url || "").trim()
+
+      // [v2.4.8] Ciblage par plateforme. Chaque plateforme lit SA PROPRE clé :
+      //   - PC (AnnounceBanner)      → app_config.announce_pc
+      //   - Android (NewsWorker)     → app_config.announce_android
+      // Une annonce « PC » n'atterrit donc plus sur les téléphones et inversement.
+      // 'all' écrit dans les deux clés. Défaut 'all' pour rétrocompatibilité.
+      const target = String(body.target || "all").toLowerCase()
+      const keys = target === "pc" ? ["announce_pc"]
+        : target === "android" ? ["announce_android"]
+        : ["announce_pc", "announce_android"]
+
+      if (!title && !message) {
+        // Effacement de la/les plateforme(s) ciblée(s).
+        for (const key of keys) {
+          const { error } = await supabase.from("app_config").upsert({ key, value: "" })
+          if (error) throw error
+        }
+        return json({ success: true, cleared: true, target })
+      }
+      if (!title || !message) {
+        return json({ success: false, error: "Titre et message requis." }, 400)
+      }
+
+      const announce = { id: Date.now().toString(), title, body: message, url }
+      const value = JSON.stringify(announce)
+      for (const key of keys) {
+        const { error } = await supabase.from("app_config").upsert({ key, value })
+        if (error) throw error
+      }
+      return json({ success: true, announce, target })
     }
 
     return json({ success: false, error: "Action inconnue." }, 400)
