@@ -20,9 +20,10 @@ import {
 import { 
   getMachineId 
 } from './machine'
-import { 
+import {
   licenseBackendRequest,
   supabaseRequest,
+  supabaseRequestRaw,
   uploadFileToSignedUrl
 } from './licensing'
 import { 
@@ -752,15 +753,39 @@ export function registerIpcHandlers(win: BrowserWindow) {
   })
 
   // [v1.9.34] Heartbeat for online status
+  // [v2.5.0] Sert AUSSI a restaurer une licence : l'ancienne version sortait
+  // immediatement quand l'app n'etait pas activee, ce qui l'empechait justement de
+  // reconnaitre un client qui vient de reinstaller Windows ou DoulGet. Il devait
+  // retaper sa cle, et nous ecrire quand il l'avait perdue.
   ipcMain.handle('ping-license', async () => {
     const isActivated = state.appSettings.isActivated
-    if (!isActivated) return { success: false }
-
     const mid = await getMachineId()
-    
+
     // Check cloud status first
     const cloud = await licenseBackendRequest('ping-license', { machineId: mid })
-    
+
+    // Le serveur reconnait la machine alors que l'app se croit non activee :
+    // on retablit la licence sans rien demander. Le controle reste cote serveur,
+    // c'est lui qui a decide que cette machine a droit a cette cle.
+    if (cloud.status === 'FOUND' && !isActivated && cloud.licenseKey) {
+      const restored = saveSettings({
+        isActivated: true,
+        licenseKey: cloud.licenseKey,
+        expiryDate: cloud.expiry ?? null
+      })
+      if (restored) state.appSettings = restored
+
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) safeSend(win, 'license-restored', cloud.expiry ?? null)
+      })
+      return { success: true, restored: true }
+    }
+
+    // Pas de licence en ligne et rien a desactiver localement : on s'arrete la.
+    // Sans ce garde-fou, un poste jamais active declencherait l'alerte de
+    // desactivation a chaque battement de coeur.
+    if (!isActivated) return { success: false }
+
     // If deleted from cloud (NOT_FOUND) or blocked (isBlocked: true)
     if (cloud.status === 'NOT_FOUND' || cloud.status === 'BLOCKED' || cloud.status === 'EXPIRED') {
         console.error(`[Licensing] Client ${mid} ${cloud.status === 'NOT_FOUND' ? 'suppressed' : 'blocked'} from Cloud. Deactivating...`)
@@ -868,6 +893,27 @@ export function registerIpcHandlers(win: BrowserWindow) {
     // [v1.8.5] Use a browser-like User-Agent for GitHub/CDN redirects
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+    // [v2.4.8] TÉLÉCHARGEMENT REPRENABLE. Avant, chaque appel supprimait le fichier
+    // et repartait de 0 : une coupure réseau à 80 % → « Réessayer » re-téléchargeait
+    // les 195 Mo entiers. Désormais on écrit dans un fichier `.part`, et à la reprise
+    // on demande au serveur (GitHub/CDN, qui supporte l'en-tête HTTP Range → 206) de
+    // continuer là où on s'était arrêté. Le `.part` n'est renommé en fichier final
+    // qu'après vérification SHA-256 réussie.
+    const partPath = `${tempPath}.part`;
+    const partHashPath = `${partPath}.expected`; // hash attendu du .part en cours
+
+    // Si un .part traîne mais correspond à une AUTRE version (hash attendu différent),
+    // on le jette : reprendre dessus produirait un fichier corrompu.
+    try {
+        if (fs.existsSync(partPath)) {
+            const prevHash = fs.existsSync(partHashPath) ? fs.readFileSync(partHashPath, 'utf8').trim() : '';
+            if (prevHash.toLowerCase() !== expectedHash.toLowerCase()) {
+                fs.unlinkSync(partPath);
+            }
+        }
+    } catch { /* on repartira simplement de 0 */ }
+    try { fs.writeFileSync(partHashPath, expectedHash.toLowerCase(), 'utf8'); } catch { /* non bloquant */ }
+
     const downloadFile = (url: string, redirectCount = 0): Promise<{ success: boolean, error?: string }> => {
         if (redirectCount > 5) {
             return Promise.resolve({ success: false, error: 'Trop de redirections' });
@@ -875,77 +921,118 @@ export function registerIpcHandlers(win: BrowserWindow) {
 
         return new Promise((resolve) => {
             try {
-                // Remove old update if exists on first call
-                if (redirectCount === 0 && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+                // Octets déjà présents sur le disque → point de reprise (lu à CHAQUE
+                // tentative, jamais un compteur en mémoire, pour rester exact même si
+                // un dernier morceau n'avait pas été vidé sur le disque avant la coupure).
+                let existingBytes = 0;
+                try { if (fs.existsSync(partPath)) existingBytes = fs.statSync(partPath).size; } catch { existingBytes = 0; }
 
-                // [v1.8.5] Added User-Agent header (required by GitHub)
-                const options = {
-                    headers: { 'User-Agent': USER_AGENT }
+                // [v1.8.5] User-Agent requis par GitHub ; identity = pas de gzip (fausse
+                // la taille/les octets pour la reprise) ; Range = reprise si on a déjà des octets.
+                const headers: Record<string, string> = {
+                    'User-Agent': USER_AGENT,
+                    'Accept-Encoding': 'identity'
                 };
+                if (existingBytes > 0) headers['Range'] = `bytes=${existingBytes}-`;
 
-                const request = https.get(url, options, (response) => {
-                    // Handle Redirects (301, 302, 307, 308)
-                    if ([301, 302, 307, 308].includes(response.statusCode || 0) && response.headers.location) {
+                const request = https.get(url, { headers }, (response) => {
+                    const status = response.statusCode || 0;
+
+                    // Redirections (301, 302, 307, 308) : on relance en gardant le .part.
+                    if ([301, 302, 307, 308].includes(status) && response.headers.location) {
                         console.log(`[Update] Redirecting to: ${response.headers.location}`);
+                        response.resume(); // vide le flux de redirection
                         resolve(downloadFile(response.headers.location, redirectCount + 1));
                         return;
                     }
 
-                    if (response.statusCode !== 200) {
-                        console.error(`[Update] Failed to download: ${response.statusCode}`);
-                        event.sender.send('update-error', `Erreur serveur: ${response.statusCode}`);
-                        resolve({ success: false, error: `HTTP ${response.statusCode}` });
+                    // 416 = le serveur juge notre plage invalide (le .part est >= au fichier,
+                    // souvent un .part complet ou corrompu). On le jette et on recommence à 0.
+                    if (status === 416) {
+                        console.warn('[Update] Range 416 → .part invalide, redémarrage à 0');
+                        response.resume();
+                        try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch {}
+                        resolve(downloadFile(url, redirectCount + 1));
                         return;
                     }
 
-                    const totalSize = parseInt(response.headers['content-length'] || '0', 10);
-                    let downloadedSize = 0;
-                    const file = fs.createWriteStream(tempPath);
+                    // Seuls 200 (complet) et 206 (partiel) sont exploitables.
+                    if (status !== 200 && status !== 206) {
+                        console.error(`[Update] Failed to download: ${status}`);
+                        event.sender.send('update-error', `Erreur serveur: ${status}`);
+                        resolve({ success: false, error: `HTTP ${status}` });
+                        return;
+                    }
+
+                    // 206 = le serveur reprend → on ajoute à la suite du .part.
+                    // 200 = le serveur renvoie TOUT le fichier (a ignoré Range ou 1re fois)
+                    //       → on repart de 0 en écrasant le .part.
+                    const resuming = status === 206;
+                    const startBytes = resuming ? existingBytes : 0;
+                    const remaining = parseInt(response.headers['content-length'] || '0', 10);
+                    const totalSize = remaining > 0 ? startBytes + remaining : 0;
+                    let downloadedSize = startBytes;
+
+                    const file = fs.createWriteStream(partPath, { flags: resuming ? 'a' : 'w' });
+                    let settled = false;
+                    const fail = (err: string) => {
+                        if (settled) return;
+                        settled = true;
+                        // On NE supprime PAS le .part : la prochaine tentative reprendra.
+                        try { file.close(); } catch {}
+                        console.error('[Update] Interrompu:', err);
+                        event.sender.send('update-error', err);
+                        resolve({ success: false, error: err });
+                    };
 
                     response.on('data', (chunk) => {
                         downloadedSize += chunk.length;
-                        file.write(chunk);
-                        
                         if (totalSize > 0) {
-                            const progress = Math.round((downloadedSize / totalSize) * 100);
+                            const progress = Math.min(99, Math.round((downloadedSize / totalSize) * 100));
                             event.sender.send('update-progress', progress);
                         }
                     });
 
-                    response.on('end', () => {
-                        file.end(() => {
-                            try {
-                                const actualHash = sha256File(tempPath)
-                                if (actualHash.toLowerCase() !== expectedHash.toLowerCase()) {
-                                    try { fs.unlinkSync(tempPath) } catch {}
-                                    const error = 'Vérification SHA-256 échouée. Mise à jour refusée.'
-                                    console.error(`[Update] Hash mismatch. Expected ${expectedHash}, got ${actualHash}`)
-                                    event.sender.send('update-error', error)
-                                    resolve({ success: false, error })
-                                    return
-                                }
+                    // Coupure réseau en cours de flux → on garde le .part pour reprendre.
+                    response.on('error', (err) => fail(err.message));
+                    response.on('aborted', () => fail('Connexion interrompue'));
 
-                                console.log('[Update] Download complete and SHA-256 verified.')
-                                fs.writeFileSync(`${tempPath}.sha256`, expectedHash.toLowerCase(), 'utf8')
-                                event.sender.send('update-ready')
-                                resolve({ success: true })
-                            } catch (verifyError: any) {
-                                const error = verifyError.message || 'Erreur de vérification de la mise à jour.'
-                                event.sender.send('update-error', error)
-                                resolve({ success: false, error })
+                    response.pipe(file);
+
+                    file.on('error', (err) => fail(err.message));
+                    file.on('finish', () => {
+                        if (settled) return;
+                        settled = true;
+                        try {
+                            const actualHash = sha256File(partPath);
+                            if (actualHash.toLowerCase() !== expectedHash.toLowerCase()) {
+                                // Fichier corrompu/incomplet : on le jette pour repartir propre.
+                                try { fs.unlinkSync(partPath); } catch {}
+                                try { fs.unlinkSync(partHashPath); } catch {}
+                                const error = 'Vérification SHA-256 échouée. Mise à jour refusée.';
+                                console.error(`[Update] Hash mismatch. Expected ${expectedHash}, got ${actualHash}`);
+                                event.sender.send('update-error', error);
+                                resolve({ success: false, error });
+                                return;
                             }
-                        });
-                    });
-
-                    response.on('error', (err) => {
-                        file.end();
-                        console.error('[Update] Stream error:', err);
-                        event.sender.send('update-error', err.message);
-                        resolve({ success: false, error: err.message });
+                            // Vérifié → on remplace le fichier final par le .part.
+                            try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+                            fs.renameSync(partPath, tempPath);
+                            try { fs.unlinkSync(partHashPath); } catch {}
+                            console.log('[Update] Download complete and SHA-256 verified.');
+                            fs.writeFileSync(`${tempPath}.sha256`, expectedHash.toLowerCase(), 'utf8');
+                            event.sender.send('update-ready');
+                            resolve({ success: true });
+                        } catch (verifyError: any) {
+                            const error = verifyError.message || 'Erreur de vérification de la mise à jour.';
+                            event.sender.send('update-error', error);
+                            resolve({ success: false, error });
+                        }
                     });
                 });
 
                 request.on('error', (err) => {
+                    // Erreur réseau avant/pendant la requête → .part conservé pour reprise.
                     console.error('[Update] Request error:', err);
                     event.sender.send('update-error', err.message);
                     resolve({ success: false, error: err.message });
@@ -1007,22 +1094,35 @@ export function registerIpcHandlers(win: BrowserWindow) {
   })
 
   // [v1.6.1] FEEDBACK SYSTEM: Submit a rating + comment
+  // [v2.4.9] La table `feedback` a une contrainte UNIQUE sur `hwid` (un avis par
+  // appareil). Un 2e envoi → 409. ⚠ On NE PEUT PAS détecter le doublon par un GET
+  // préalable : la RLS interdit la lecture (SELECT) au rôle anon → un GET renvoie
+  // TOUJOURS 0 ligne même quand la ligne existe (vérifié : la table a 8 lignes, anon
+  // en voit 0). Seul le CODE HTTP du POST fait foi : 2xx = envoyé, 409 = déjà envoyé,
+  // reste = vraie panne réseau. (Avant, `supabaseRequest` écrasait tout en null → l'UI
+  // affichait « Vérifiez votre connexion » alors que la connexion était bonne.)
   ipcMain.handle('submit-feedback', async (_event, rating: number, comment: string) => {
     try {
       const mid = await getMachineId();
       const version = app.getVersion();
-      const result = await supabaseRequest('feedback', 'POST', {
+      const res = await supabaseRequestRaw('feedback', 'POST', {
         hwid: mid,
         rating,
         comment: comment || null,
         app_version: version,
         created_at: new Date().toISOString()
       });
-      if (result) {
+      if (res.status >= 200 && res.status < 300) {
         console.log('[Feedback] Submitted successfully.');
         return { success: true };
       }
-      return { success: false, error: 'Supabase error' };
+      if (res.status === 409) {
+        console.log('[Feedback] Déjà envoyé pour cet appareil (409).');
+        return { success: false, error: 'ALREADY_SUBMITTED', already: true };
+      }
+      // status 0 = pas de réponse (réseau) ; autre = erreur serveur.
+      console.error('[Feedback] Échec, statut', res.status);
+      return { success: false, error: res.status ? `Erreur serveur (${res.status})` : 'Pas de connexion' };
     } catch (e: any) {
       console.error('[Feedback] Error:', e);
       return { success: false, error: e.message };
@@ -1032,6 +1132,30 @@ export function registerIpcHandlers(win: BrowserWindow) {
   // [v1.6.1] FEEDBACK SYSTEM: Admin get all feedback
   ipcMain.handle('admin-get-feedback', async (_event, password: string) => {
     return await licenseBackendRequest('admin-get-feedback', { password })
+  })
+
+  // [v2.4.5] ANNONCES: publier (ou effacer avec titre+message vides) l'annonce mobile.
+  // Stockée dans app_config (clé "announce") ; les téléphones la notifient une fois.
+  // [v2.4.8] `target` = 'pc' | 'android' | 'all' → l'annonce n'est écrite que dans
+  // la/les clé(s) app_config de la plateforme visée (announce_pc / announce_android).
+  ipcMain.handle('admin-set-announce', async (_event, password: string, title: string, message: string, url: string, target: string = 'all') => {
+    return await licenseBackendRequest('admin-set-announce', { password, title, message, url, target })
+  })
+
+  // [v2.4.5] ANNONCES: lire l'annonce en cours (lecture anon d'app_config)
+  // [v2.4.8] Chaque plateforme lit SA clé. Le bandeau PC appelle get-announce() sans
+  // argument → 'announce_pc'. Le panneau admin lit aussi 'announce_android' pour
+  // afficher les deux annonces en cours.
+  ipcMain.handle('get-announce', async (_event, platform: string = 'pc') => {
+    try {
+      const key = platform === 'android' ? 'announce_android' : 'announce_pc';
+      const data = await supabaseRequest(`app_config?key=eq.${key}&select=value`, 'GET');
+      const raw = data && Array.isArray(data) && data.length > 0 ? data[0].value : '';
+      if (!raw) return { announce: null };
+      return { announce: JSON.parse(raw) };
+    } catch {
+      return { announce: null };
+    }
   })
 
   // [v1.6.1] FEEDBACK SYSTEM: Check if HWID already submitted feedback

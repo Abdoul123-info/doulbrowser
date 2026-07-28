@@ -17,6 +17,9 @@ type LicenseBackendResponse = {
   status?: 'FOUND' | 'NOT_FOUND' | 'BLOCKED' | 'EXPIRED'
   valid?: boolean
   key?: string
+  // Renvoyee par `ping-license` quand le serveur reconnait la machine : elle permet
+  // de restaurer une licence apres reinstallation sans redemander la cle au client.
+  licenseKey?: string
   expiry?: string | null
   licenses?: any[]
   feedback?: any[]
@@ -126,6 +129,55 @@ export async function supabaseRequest(
     })
 
     req.on('error', () => resolve(null))
+    if (body) req.write(JSON.stringify(body))
+    req.end()
+  })
+}
+
+/**
+ * [v2.4.9] Comme supabaseRequest mais expose le STATUT HTTP au lieu de tout écraser
+ * en `null`. Indispensable pour distinguer un 409 (doublon — ex. contrainte unique
+ * `feedback_hwid_unique`) d'une vraie panne réseau. ⚠ La RLS de `feedback` interdit
+ * la lecture (SELECT) au rôle anon : impossible de détecter un doublon par un GET
+ * préalable (il renvoie toujours 0 ligne) — seul le code du POST fait foi.
+ * `status: 0` = pas de réponse (réseau coupé, timeout, config manquante).
+ */
+export async function supabaseRequestRaw(
+  path: string,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
+  body?: any
+): Promise<{ status: number; data: any }> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return { status: 0, data: null }
+
+  return new Promise((resolve) => {
+    const url = new URL(`${SUPABASE_URL}/rest/v1/${path}`)
+    const options = {
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method,
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        ...(method !== 'GET' ? { Prefer: 'return=minimal' } : {})
+      },
+      timeout: 10000
+    }
+
+    const req = https.request(options, (res) => {
+      let data = ''
+      res.on('data', (chunk) => (data += chunk))
+      res.on('end', () => {
+        let parsed: any = null
+        try { parsed = data ? JSON.parse(data) : null } catch { parsed = null }
+        resolve({ status: res.statusCode || 0, data: parsed })
+      })
+    })
+
+    req.on('error', () => resolve({ status: 0, data: null }))
+    // L'option `timeout` émet l'événement mais N'ABORTE PAS la requête seule :
+    // sans ce handler, un réseau qui traîne resterait bloqué (bug de supabaseRequest).
+    req.on('timeout', () => { req.destroy(); resolve({ status: 0, data: null }) })
     if (body) req.write(JSON.stringify(body))
     req.end()
   })

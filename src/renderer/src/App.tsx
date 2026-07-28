@@ -14,6 +14,7 @@ import { BatchDownloadModal } from './components/BatchDownloadModal';
 import { BackgroundTasks } from './components/BackgroundTasks';
 import { FeedbackModal } from './components/FeedbackModal';
 import { ExtensionUpdateNotification } from './components/ExtensionUpdateNotification';
+import { AnnounceBanner } from './components/AnnounceBanner';
 
 export default function App() {
   const [activeFilter, setActiveFilter] = useState('all');
@@ -48,6 +49,12 @@ export default function App() {
     window.api.onLicenseDeactivated((_event, reason) => {
       alert(reason);
       setIsActivated(false);
+    });
+
+    // [v2.5.0] Licence retrouvée sur le serveur (réinstallation de DoulGet ou de
+    // Windows) : on ouvre l'application sans faire retaper la clé au client.
+    window.api.onLicenseRestored(() => {
+      setIsActivated(true);
     });
 
     // [v1.9.34] Heartbeat for Online status (every 2 minutes)
@@ -198,6 +205,7 @@ export default function App() {
             }}
           />
           <ExtensionUpdateNotification />
+          <AnnounceBanner />
         </div>
       )}
 

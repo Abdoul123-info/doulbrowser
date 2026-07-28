@@ -50,6 +50,8 @@ const api = {
   pingLicense: () => ipcRenderer.invoke('ping-license'),
   adminDeleteLicenseCloud: (password: string, targetMid: string) => ipcRenderer.invoke('admin-delete-license-cloud', password, targetMid),
   onLicenseDeactivated: (callback: (event: any, reason: string) => void) => ipcRenderer.on('license-deactivated', callback),
+  // [v2.5.0] Licence retrouvee sur le serveur apres une reinstallation
+  onLicenseRestored: (callback: (event: any, expiry: string | null) => void) => ipcRenderer.on('license-restored', callback),
   // [v1.2.9] MP3 Converter APIs 🎵
   selectLocalVideo: () => ipcRenderer.invoke('select-local-video'),
   localConvertVideoToMp3: (path: string) => ipcRenderer.invoke('local-convert-video-to-mp3', path),
@@ -63,6 +65,9 @@ const api = {
   // [v1.6.1] Feedback APIs ★
   submitFeedback: (rating: number, comment: string) => ipcRenderer.invoke('submit-feedback', rating, comment),
   adminGetFeedback: (password: string) => ipcRenderer.invoke('admin-get-feedback', password),
+  // [v2.4.5] Annonces mobiles 📣
+  adminSetAnnounce: (password: string, title: string, message: string, url: string, target: string = 'all') => ipcRenderer.invoke('admin-set-announce', password, title, message, url, target),
+  getAnnounce: (platform: string = 'pc') => ipcRenderer.invoke('get-announce', platform),
   getFeedbackStatus: () => ipcRenderer.invoke('get-feedback-status'),
   // [v1.6.0] Auto-Update APIs 🚀
   startAppUpdate: (downloadUrl: string, expectedHash: string) => ipcRenderer.invoke('start-app-update', downloadUrl, expectedHash),

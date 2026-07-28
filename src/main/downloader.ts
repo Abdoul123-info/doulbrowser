@@ -2147,6 +2147,26 @@ export async function downloadWithYtDlp(
             }
             // Still try best, but it will likely produce the tiny file the user complained about
             downloadArgs.push('-f', 'best')
+          } else if (url.includes('tiktok.com')) {
+            // [TikTok] Deux pièges, vérifiés sur des fichiers réellement téléchargés :
+            //  1. `bestvideo+bestaudio/best` retenait le format « bytevc1 » (= H.265/HEVC),
+            //     que Windows ne lit PAS sans extension payante -> l'utilisateur devait
+            //     ouvrir la vidéo avec VLC. On trie donc en préférant H.264 (`-S vcodec:h264`),
+            //     lisible partout ; on garde `res` ensuite pour prendre la meilleure
+            //     définition PARMI les H.264. Si une vidéo n'existe qu'en H.265, le tri
+            //     (et non un filtre) la laisse quand même passer.
+            //  2. `bestvideo` pouvait retenir une piste SANS AUDIO -> fichiers muets.
+            //     `best*[acodec!=none][vcodec!=none]` exige un format qui contient
+            //     réellement les deux pistes.
+            downloadArgs.push(
+              '-f',
+              'best*[acodec!=none][vcodec!=none]/bestvideo+bestaudio/best',
+              '-S',
+              'vcodec:h264,res',
+              '--merge-output-format',
+              'mp4'
+            )
+            console.log('[yt-dlp] TikTok: sélecteur H.264 + audio obligatoire')
           } else if (hasFfmpeg) {
             downloadArgs.push('-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4')
           } else {

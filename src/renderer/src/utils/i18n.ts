@@ -149,6 +149,8 @@ export interface Translations {
     commentLabel: string;
     commentPlaceholder: string;
     sendError: string;
+    alreadyTitle: string;
+    alreadySub: string;
     later: string;
     send: string;
     thankYou: string;
@@ -474,6 +476,8 @@ const translations: Record<Language, Translations> = {
       commentLabel: 'Commentaire (facultatif)',
       commentPlaceholder: 'Partagez votre expérience, suggestions, ou problèmes rencontrés...',
       sendError: '⚠️ Erreur lors de l\'envoi. Vérifiez votre connexion.',
+      alreadyTitle: 'Vous avez déjà donné votre avis',
+      alreadySub: 'Merci ! Un seul avis par appareil est enregistré.',
       later: 'Plus tard',
       send: 'Envoyer',
       thankYou: 'Merci pour votre avis !',
@@ -791,6 +795,8 @@ const translations: Record<Language, Translations> = {
       commentLabel: 'Comment (optional)',
       commentPlaceholder: 'Share your experience, suggestions, or issues...',
       sendError: '⚠️ Error sending. Check your connection.',
+      alreadyTitle: 'You have already given your feedback',
+      alreadySub: 'Thanks! Only one review per device is recorded.',
       later: 'Later',
       send: 'Send',
       thankYou: 'Thank you for your feedback!',

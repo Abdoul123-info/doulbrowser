@@ -1,4 +1,4 @@
-import { X, ShieldAlert, ShieldCheck, Key, FileText, Clipboard, CheckCircle2, AlertCircle, Cloud, RefreshCw, UploadCloud, Package, Search, Star, MessageSquare, AlertTriangle } from 'lucide-react';
+import { X, ShieldAlert, ShieldCheck, Key, FileText, Clipboard, CheckCircle2, AlertCircle, Cloud, RefreshCw, UploadCloud, Package, Search, Star, MessageSquare, AlertTriangle, Monitor, Smartphone, Megaphone } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from '../utils/i18n';
 
@@ -38,6 +38,77 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
     const [searchCloud, setSearchCloud] = useState('');
     const [feedbackList, setFeedbackList] = useState<any[]>([]);
     const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
+
+    // [v2.4.5] Annonce aux utilisateurs mobiles (notification sur leurs téléphones)
+    const [announceTitle, setAnnounceTitle] = useState('');
+    const [announceMessage, setAnnounceMessage] = useState('');
+    const [announceUrl, setAnnounceUrl] = useState('');
+    // [v2.4.8] Cible de l'annonce : 'all' (les deux), 'pc' ou 'android'.
+    const [announceTarget, setAnnounceTarget] = useState<'all' | 'pc' | 'android'>('all');
+    const [currentAnnounce, setCurrentAnnounce] = useState<{ id: string, title: string, body: string, url?: string } | null>(null);
+    const [currentAnnounceAndroid, setCurrentAnnounceAndroid] = useState<{ id: string, title: string, body: string, url?: string } | null>(null);
+    const [isSendingAnnounce, setIsSendingAnnounce] = useState(false);
+
+    const refreshAnnounce = async () => {
+        try {
+            const [pc, android] = await Promise.all([
+                window.api.getAnnounce('pc'),
+                window.api.getAnnounce('android')
+            ]);
+            setCurrentAnnounce(pc?.announce || null);
+            setCurrentAnnounceAndroid(android?.announce || null);
+        } catch { setCurrentAnnounce(null); setCurrentAnnounceAndroid(null); }
+    };
+
+    const handleSendAnnounce = async () => {
+        if (!announceTitle.trim() || !announceMessage.trim()) {
+            setMessage({ type: 'error', text: 'Titre et message requis.' });
+            return;
+        }
+        setIsSendingAnnounce(true);
+        try {
+            const res = await window.api.adminSetAnnounce(password, announceTitle.trim(), announceMessage.trim(), announceUrl.trim(), announceTarget);
+            if (res?.success) {
+                const cible = announceTarget === 'pc' ? 'aux utilisateurs PC'
+                    : announceTarget === 'android' ? 'aux téléphones (reçue sous ~3 h)'
+                    : 'à tous (PC + téléphones sous ~3 h)';
+                setMessage({ type: 'success', text: `Annonce publiée ${cible}.` });
+                setAnnounceTitle(''); setAnnounceMessage(''); setAnnounceUrl('');
+                await refreshAnnounce();
+            } else {
+                setMessage({ type: 'error', text: res?.error || 'Échec de la publication.' });
+            }
+        } catch (e: any) {
+            setMessage({ type: 'error', text: e?.message || 'Échec de la publication.' });
+        }
+        setIsSendingAnnounce(false);
+    };
+
+    const handleClearAnnounce = (target: 'pc' | 'android') => {
+        const nom = target === 'pc' ? 'PC' : 'Android';
+        showConfirm(`Supprimer l'annonce ${nom} en cours ?`, async () => {
+            setIsSendingAnnounce(true);
+            try {
+                const res = await window.api.adminSetAnnounce(password, '', '', '', target);
+                if (res?.success) {
+                    setMessage({ type: 'success', text: `Annonce ${nom} supprimée.` });
+                    await refreshAnnounce();
+                } else {
+                    setMessage({ type: 'error', text: res?.error || 'Échec de la suppression.' });
+                }
+            } catch (e: any) {
+                setMessage({ type: 'error', text: e?.message || 'Échec de la suppression.' });
+            }
+            setIsSendingAnnounce(false);
+        });
+    };
+
+    // Séparation PC / Mobile : Android envoie son ANDROID_ID (16 caractères hexadécimaux),
+    // le PC un UUID matériel long — le format du hwid suffit à distinguer les plateformes.
+    const isMobileHwid = (hwid?: string): boolean => !!hwid && /^[0-9a-f]{16}$/i.test(hwid.trim());
+    const [cloudFilter, setCloudFilter] = useState<'all' | 'pc' | 'mobile'>('all');
+    const [feedbackFilter, setFeedbackFilter] = useState<'all' | 'pc' | 'mobile'>('all');
+    const visibleFeedback = feedbackList.filter(f => feedbackFilter === 'all' || (feedbackFilter === 'mobile') === isMobileHwid(f.hwid));
 
     const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; message: string; onConfirm: () => void }>({
         open: false,
@@ -349,8 +420,12 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[100] animate-in fade-in duration-300">
-            <div className="bg-[#0f172a] border border-blue-500/30 rounded-xl shadow-2xl w-full max-w-xl p-8 animate-in zoom-in-95 duration-200">
-                <div className="flex justify-between items-center mb-8 border-b border-blue-500/20 pb-4">
+            {/* [v2.4.9] max-h-[90vh] + flex-col : la boîte ne dépasse plus l'écran ;
+                l'en-tête reste fixe et le contenu défile (avant, sur les onglets longs
+                comme « Mises à jour », les boutons Publier passaient sous le bord sans
+                scroll possible → l'utilisateur devait baisser la résolution Windows). */}
+            <div className="bg-[#0f172a] border border-blue-500/30 rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col p-8 animate-in zoom-in-95 duration-200">
+                <div className="flex justify-between items-center mb-6 border-b border-blue-500/20 pb-4 shrink-0">
                     <h3 className="text-xl font-bold flex items-center gap-3 text-blue-400">
                         <ShieldAlert className="w-6 h-6 text-red-500 animate-pulse" />
                         Administration Licence (SECRET)
@@ -360,6 +435,9 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                     </button>
                 </div>
 
+                {/* [v2.4.9] Zone défilante : min-h-0 est indispensable pour qu'un enfant
+                    flex puisse rétrécir et déclencher le overflow-y-auto. */}
+                <div className="flex-1 overflow-y-auto min-h-0 -mr-4 pr-4 custom-scrollbar">
                 {!isAuthenticated ? (
                     <div className="space-y-6">
                         <p className="text-sm text-blue-200/70 text-center italic">
@@ -408,7 +486,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                 {t.admin.tabCloud}
                             </button>
                             <button
-                                onClick={() => setActiveTab('updates')}
+                                onClick={() => { setActiveTab('updates'); refreshAnnounce(); }}
                                 className={`flex-1 py-1.5 text-xs font-bold rounded transition-all ${activeTab === 'updates' ? 'bg-blue-600 text-white shadow-lg' : 'text-blue-300/50 hover:text-blue-300'}`}
                             >
                                 <RefreshCw className="w-3.5 h-3.5 inline mr-2" />
@@ -540,6 +618,16 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                         </div>
                                         <div className="h-8 w-px bg-blue-500/10" />
                                         <div className="flex flex-col">
+                                            <span className="flex items-center gap-1 text-[10px] text-blue-300/50 uppercase font-bold tracking-widest"><Monitor className="w-3 h-3" /> PC</span>
+                                            <span className="text-xl font-black text-blue-300">{cloudLicenses.filter(l => !isMobileHwid(l.hwid)).length}</span>
+                                        </div>
+                                        <div className="h-8 w-px bg-blue-500/10" />
+                                        <div className="flex flex-col">
+                                            <span className="flex items-center gap-1 text-[10px] text-purple-300/50 uppercase font-bold tracking-widest"><Smartphone className="w-3 h-3" /> Mobile</span>
+                                            <span className="text-xl font-black text-purple-400">{cloudLicenses.filter(l => isMobileHwid(l.hwid)).length}</span>
+                                        </div>
+                                        <div className="h-8 w-px bg-blue-500/10" />
+                                        <div className="flex flex-col">
                                             <span className="text-[10px] text-green-400/50 uppercase font-bold tracking-widest">{t.admin.online}</span>
                                             <span className="text-xl font-black text-green-400">
                                                 {cloudLicenses.filter(l => l.last_seen && (Date.now() - new Date(l.last_seen).getTime() < 15 * 60 * 1000)).length}
@@ -561,15 +649,31 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                     </button>
                                 </div>
 
-                                <div className="relative">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-400/50" />
-                                    <input
-                                        type="text"
-                                        placeholder={t.admin.searchPlaceholder}
-                                        value={searchCloud}
-                                        onChange={(e) => setSearchCloud(e.target.value)}
-                                        className="w-full pl-9 pr-4 py-2 bg-black/40 text-[10px] text-blue-100 border border-blue-500/20 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500/50"
-                                    />
+                                <div className="flex gap-2 items-center">
+                                    <div className="relative flex-1">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-400/50" />
+                                        <input
+                                            type="text"
+                                            placeholder={t.admin.searchPlaceholder}
+                                            value={searchCloud}
+                                            onChange={(e) => setSearchCloud(e.target.value)}
+                                            className="w-full pl-9 pr-4 py-2 bg-black/40 text-[10px] text-blue-100 border border-blue-500/20 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                                        />
+                                    </div>
+                                    <div className="flex bg-black/40 p-0.5 rounded-md border border-blue-500/20 shrink-0">
+                                        <button
+                                            onClick={() => setCloudFilter('all')}
+                                            className={`px-2.5 py-1.5 text-[9px] font-bold rounded transition-all ${cloudFilter === 'all' ? 'bg-blue-600 text-white' : 'text-blue-300/50 hover:text-blue-300'}`}
+                                        >TOUS</button>
+                                        <button
+                                            onClick={() => setCloudFilter('pc')}
+                                            className={`flex items-center gap-1 px-2.5 py-1.5 text-[9px] font-bold rounded transition-all ${cloudFilter === 'pc' ? 'bg-blue-600 text-white' : 'text-blue-300/50 hover:text-blue-300'}`}
+                                        ><Monitor className="w-3 h-3" /> PC</button>
+                                        <button
+                                            onClick={() => setCloudFilter('mobile')}
+                                            className={`flex items-center gap-1 px-2.5 py-1.5 text-[9px] font-bold rounded transition-all ${cloudFilter === 'mobile' ? 'bg-purple-600 text-white' : 'text-purple-300/50 hover:text-purple-300'}`}
+                                        ><Smartphone className="w-3 h-3" /> MOBILE</button>
+                                    </div>
                                 </div>
 
                                 <div className="bg-black/60 border border-blue-500/20 rounded-md overflow-hidden flex flex-col h-96">
@@ -587,6 +691,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                             </div>
                                         ) : (
                                             cloudLicenses
+                                                .filter(lic => cloudFilter === 'all' || (cloudFilter === 'mobile') === isMobileHwid(lic.hwid))
                                                 .filter(lic => {
                                                     const s = searchCloud.toLowerCase();
                                                     return lic.hwid?.toLowerCase().includes(s) ||
@@ -603,6 +708,9 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                                                 title={`ID: ${lic.hwid}\nDernière activité: ${lic.last_seen ? new Date(lic.last_seen).toLocaleTimeString() : 'Jamais'}\nIl y a: ${lic.last_seen ? Math.round((Date.now() - new Date(lic.last_seen).getTime()) / 1000 / 60) : '?'} minutes`}
                                                             >
                                                                 <div className={`shrink-0 w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]' : 'bg-gray-600'}`} />
+                                                                {isMobileHwid(lic.hwid)
+                                                                    ? <Smartphone className="shrink-0 w-3 h-3 text-purple-400" />
+                                                                    : <Monitor className="shrink-0 w-3 h-3 text-blue-400/70" />}
                                                                 <span className="text-[9px] font-mono text-blue-400 truncate">{lic.hwid}</span>
                                                                 {isOnline && <span className="shrink-0 text-[7px] bg-green-500 text-white px-1 rounded-sm font-black animate-bounce shadow-lg shadow-green-500/20">LIVE</span>}
                                                             </div>
@@ -824,6 +932,113 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                         Remplissez la version du Logiciel ou de l'Extension (ou les deux) puis cliquez sur Publier.
                                     </p>
                                 </div>
+
+                                {/* [v2.4.5] Annonce aux utilisateurs de DoulGet Mobile */}
+                                <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+                                    <h4 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
+                                        <Megaphone className="w-4 h-4 text-purple-400" />
+                                        Annonce à tous les utilisateurs
+                                    </h4>
+                                    <p className="text-[10px] text-purple-300/50 mb-4">
+                                        Choisissez qui la reçoit. Sur téléphone : notification (sous ~3 h) et dialogue à l'ouverture. Sur PC : bandeau dans l'application. Chaque annonce n'est montrée qu'une seule fois par utilisateur.
+                                    </p>
+
+                                    {currentAnnounce && (
+                                        <div className="mb-2 p-3 bg-black/30 border border-blue-500/20 rounded-lg">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className="text-[9px] text-blue-300/80 uppercase font-bold flex items-center gap-1"><Monitor className="w-3 h-3" /> Annonce PC en cours</span>
+                                                <button
+                                                    onClick={() => handleClearAnnounce('pc')}
+                                                    disabled={isSendingAnnounce}
+                                                    className="text-[9px] text-red-400 hover:text-red-300 underline"
+                                                >
+                                                    Supprimer
+                                                </button>
+                                            </div>
+                                            <p className="text-xs font-bold text-purple-100">📣 {currentAnnounce.title}</p>
+                                            <p className="text-[11px] text-purple-200/70 whitespace-pre-wrap">{currentAnnounce.body}</p>
+                                            {currentAnnounce.url && (
+                                                <p className="text-[10px] text-purple-300/50 truncate mt-1">🔗 {currentAnnounce.url}</p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {currentAnnounceAndroid && (
+                                        <div className="mb-4 p-3 bg-black/30 border border-green-500/20 rounded-lg">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className="text-[9px] text-green-300/80 uppercase font-bold flex items-center gap-1"><Smartphone className="w-3 h-3" /> Annonce Android en cours</span>
+                                                <button
+                                                    onClick={() => handleClearAnnounce('android')}
+                                                    disabled={isSendingAnnounce}
+                                                    className="text-[9px] text-red-400 hover:text-red-300 underline"
+                                                >
+                                                    Supprimer
+                                                </button>
+                                            </div>
+                                            <p className="text-xs font-bold text-purple-100">📣 {currentAnnounceAndroid.title}</p>
+                                            <p className="text-[11px] text-purple-200/70 whitespace-pre-wrap">{currentAnnounceAndroid.body}</p>
+                                            {currentAnnounceAndroid.url && (
+                                                <p className="text-[10px] text-purple-300/50 truncate mt-1">🔗 {currentAnnounceAndroid.url}</p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    <label className="text-[9px] text-purple-300/70 uppercase">Destinataires</label>
+                                    <div className="grid grid-cols-3 gap-2 mb-3 mt-1">
+                                        {([
+                                            { key: 'all', label: 'Les deux', icon: <Megaphone className="w-3.5 h-3.5" /> },
+                                            { key: 'pc', label: 'PC', icon: <Monitor className="w-3.5 h-3.5" /> },
+                                            { key: 'android', label: 'Android', icon: <Smartphone className="w-3.5 h-3.5" /> }
+                                        ] as const).map(opt => (
+                                            <button
+                                                key={opt.key}
+                                                onClick={() => setAnnounceTarget(opt.key)}
+                                                className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold border transition-all ${announceTarget === opt.key
+                                                    ? 'bg-purple-600 border-purple-400 text-white'
+                                                    : 'bg-black/30 border-purple-500/20 text-purple-300/70 hover:border-purple-500/50'}`}
+                                            >
+                                                {opt.icon}{opt.label}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <label className="text-[9px] text-purple-300/70 uppercase">Titre</label>
+                                    <input
+                                        type="text"
+                                        value={announceTitle}
+                                        onChange={(e) => setAnnounceTitle(e.target.value)}
+                                        placeholder="Ex : Nouvelle version, promo licence…"
+                                        maxLength={60}
+                                        className="w-full px-3 py-2 bg-black/40 text-purple-100 border border-purple-500/20 rounded text-xs focus:ring-1 focus:ring-purple-500 outline-none mb-2"
+                                    />
+
+                                    <label className="text-[9px] text-purple-300/70 uppercase">Message</label>
+                                    <textarea
+                                        value={announceMessage}
+                                        onChange={(e) => setAnnounceMessage(e.target.value)}
+                                        placeholder="Ex : Licence 1 an à 5000 F ce week-end seulement — écrivez-nous sur WhatsApp !"
+                                        maxLength={300}
+                                        rows={3}
+                                        className="w-full px-3 py-2 bg-black/40 text-purple-100 border border-purple-500/20 rounded text-xs focus:ring-1 focus:ring-purple-500 outline-none mb-2 resize-none"
+                                    />
+
+                                    <label className="text-[9px] text-purple-300/70 uppercase">Lien (facultatif — ouvert quand l'utilisateur appuie sur la notification)</label>
+                                    <input
+                                        type="text"
+                                        value={announceUrl}
+                                        onChange={(e) => setAnnounceUrl(e.target.value)}
+                                        placeholder="https://…"
+                                        className="w-full px-3 py-2 bg-black/40 text-purple-100 border border-purple-500/20 rounded text-xs focus:ring-1 focus:ring-purple-500 outline-none mb-3"
+                                    />
+
+                                    <button
+                                        onClick={handleSendAnnounce}
+                                        disabled={isSendingAnnounce || !announceTitle.trim() || !announceMessage.trim()}
+                                        className={`w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg transition-all shadow-lg text-xs ${isSendingAnnounce || !announceTitle.trim() || !announceMessage.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        {isSendingAnnounce ? 'Publication…' : '📣 Publier l\'annonce'}
+                                    </button>
+                                </div>
                             </div>
                         ) : activeTab === 'feedback' ? (
                             <div className="space-y-4 animate-in fade-in duration-300">
@@ -836,31 +1051,57 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                         </div>
                                         <div className="h-8 w-px bg-yellow-500/10" />
                                         <div className="flex flex-col">
+                                            <span className="flex items-center gap-1 text-[10px] text-blue-300/50 uppercase font-bold tracking-widest"><Monitor className="w-3 h-3" /> PC</span>
+                                            <span className="text-xl font-black text-blue-300">{feedbackList.filter(f => !isMobileHwid(f.hwid)).length}</span>
+                                        </div>
+                                        <div className="h-8 w-px bg-yellow-500/10" />
+                                        <div className="flex flex-col">
+                                            <span className="flex items-center gap-1 text-[10px] text-purple-300/50 uppercase font-bold tracking-widest"><Smartphone className="w-3 h-3" /> Mobile</span>
+                                            <span className="text-xl font-black text-purple-400">{feedbackList.filter(f => isMobileHwid(f.hwid)).length}</span>
+                                        </div>
+                                        <div className="h-8 w-px bg-yellow-500/10" />
+                                        <div className="flex flex-col">
                                             <span className="text-[10px] text-yellow-300/50 uppercase font-bold tracking-widest">{t.admin.avgRating}</span>
                                             <span className="text-xl font-black text-yellow-400">
-                                                {feedbackList.length > 0 ? (feedbackList.reduce((acc, f) => acc + f.rating, 0) / feedbackList.length).toFixed(1) : '-'}
+                                                {visibleFeedback.length > 0 ? (visibleFeedback.reduce((acc, f) => acc + f.rating, 0) / visibleFeedback.length).toFixed(1) : '-'}
                                                 <span className="text-sm"> / 5</span>
                                             </span>
                                         </div>
                                     </div>
-                                    <button
-                                        onClick={fetchFeedback}
-                                        className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 text-[10px] font-bold rounded transition-all border border-yellow-500/20"
-                                    >
-                                        <RefreshCw className={`w-3 h-3 ${isLoadingFeedback ? 'animate-spin' : ''}`} />
-                                        RAFRAÎCHIR
-                                    </button>
+                                    <div className="flex gap-2 items-center">
+                                        <div className="flex bg-black/40 p-0.5 rounded-md border border-yellow-500/20 shrink-0">
+                                            <button
+                                                onClick={() => setFeedbackFilter('all')}
+                                                className={`px-2.5 py-1.5 text-[9px] font-bold rounded transition-all ${feedbackFilter === 'all' ? 'bg-yellow-600 text-white' : 'text-yellow-300/50 hover:text-yellow-300'}`}
+                                            >TOUS</button>
+                                            <button
+                                                onClick={() => setFeedbackFilter('pc')}
+                                                className={`flex items-center gap-1 px-2.5 py-1.5 text-[9px] font-bold rounded transition-all ${feedbackFilter === 'pc' ? 'bg-blue-600 text-white' : 'text-blue-300/50 hover:text-blue-300'}`}
+                                            ><Monitor className="w-3 h-3" /> PC</button>
+                                            <button
+                                                onClick={() => setFeedbackFilter('mobile')}
+                                                className={`flex items-center gap-1 px-2.5 py-1.5 text-[9px] font-bold rounded transition-all ${feedbackFilter === 'mobile' ? 'bg-purple-600 text-white' : 'text-purple-300/50 hover:text-purple-300'}`}
+                                            ><Smartphone className="w-3 h-3" /> MOBILE</button>
+                                        </div>
+                                        <button
+                                            onClick={fetchFeedback}
+                                            className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 text-[10px] font-bold rounded transition-all border border-yellow-500/20"
+                                        >
+                                            <RefreshCw className={`w-3 h-3 ${isLoadingFeedback ? 'animate-spin' : ''}`} />
+                                            RAFRAÎCHIR
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {/* List */}
                                 <div className="bg-black/60 border border-yellow-500/20 rounded-md overflow-hidden flex flex-col h-72">
                                     <div className="flex-1 overflow-y-auto custom-scrollbar">
-                                        {feedbackList.length === 0 ? (
+                                        {visibleFeedback.length === 0 ? (
                                             <div className="p-8 text-center text-xs text-muted-foreground italic">
                                                 {t.admin.noFeedback}
                                             </div>
                                         ) : (
-                                            feedbackList.map((fb, i) => (
+                                            visibleFeedback.map((fb, i) => (
                                                 <div key={i} className="p-3 border-b border-white/5 hover:bg-white/5 transition-colors">
                                                     <div className="flex items-center justify-between mb-1">
                                                         <div className="flex items-center gap-1">
@@ -882,8 +1123,11 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                                                         </p>
                                                     )}
                                                     <div className="flex items-center justify-between mt-1.5">
-                                                        <span className="text-[8px] font-mono text-blue-400/40" title={fb.hwid}>
-                                                            HWID: {fb.hwid?.substring(0, 12)}...
+                                                        <span className="flex items-center gap-1 text-[8px] font-mono text-blue-400/40" title={fb.hwid}>
+                                                            {isMobileHwid(fb.hwid)
+                                                                ? <Smartphone className="w-2.5 h-2.5 text-purple-400" />
+                                                                : <Monitor className="w-2.5 h-2.5 text-blue-400/70" />}
+                                                            {isMobileHwid(fb.hwid) ? 'MOBILE' : 'PC'} · {fb.hwid?.substring(0, 12)}...
                                                         </span>
                                                         <span className="text-[8px] text-blue-400/30">v{fb.app_version || '?'}</span>
                                                     </div>
@@ -915,6 +1159,7 @@ export function AdminModal({ isOpen, onClose }: AdminModalProps) {
                         </div>
                     </div>
                 )}
+                </div>
                 <ConfirmDialog state={confirmDialog} onClose={closeConfirm} />
             </div>
         </div>

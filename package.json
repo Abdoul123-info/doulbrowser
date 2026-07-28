@@ -1,6 +1,6 @@
 {
   "name": "doul-get",
-  "version": "2.4.3",
+  "version": "2.5.0",
   "description": "DoulGet - Gestionnaire de téléchargements avancé",
   "main": "./out/main/index.js",
   "author": {

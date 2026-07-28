@@ -11,7 +11,7 @@ export function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
     const [rating, setRating] = useState(0)
     const [hoverRating, setHoverRating] = useState(0)
     const [comment, setComment] = useState('')
-    const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle')
+    const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'already' | 'error'>('idle')
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
     const { t } = useTranslation()
 
@@ -31,6 +31,15 @@ export function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
                     setComment('')
                     setStatus('idle')
                 }, 2000)
+            } else if (res.already) {
+                // Avis déjà enregistré pour cet appareil : ce n'est pas une erreur.
+                setStatus('already')
+                setTimeout(() => {
+                    onClose()
+                    setRating(0)
+                    setComment('')
+                    setStatus('idle')
+                }, 2500)
             } else {
                 setStatus('error')
                 setErrorMessage(res.error || null)
@@ -72,6 +81,12 @@ export function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
                             <div className="text-4xl">🎉</div>
                             <p className="text-white font-semibold">{t.feedback.thankYou}</p>
                             <p className="text-white/50 text-sm">{t.feedback.thankYouSub}</p>
+                        </div>
+                    ) : status === 'already' ? (
+                        <div className="text-center py-6 space-y-3">
+                            <div className="text-4xl">✅</div>
+                            <p className="text-white font-semibold">{t.feedback.alreadyTitle}</p>
+                            <p className="text-white/50 text-sm">{t.feedback.alreadySub}</p>
                         </div>
                     ) : (
                         <>

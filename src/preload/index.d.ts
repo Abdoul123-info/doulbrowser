@@ -72,9 +72,10 @@ export interface DownloadAPI {
   checkAppUpdate: () => Promise<{ updateAvailable: boolean, latestVersion?: string, currentVersion?: string, downloadUrl?: string, updateHash?: string }>
   adminSetLatestVersion: (password: string, newVersion: string, downloadUrl?: string, extensionVersion?: string, extensionUrl?: string, updateHash?: string, extensionHash?: string) => Promise<{ success: boolean, error?: string }>
   verifyAdminPassword: (password: string) => Promise<boolean>
-  pingLicense: () => Promise<{ success: boolean }>
+  pingLicense: () => Promise<{ success: boolean, restored?: boolean }>
   adminDeleteLicenseCloud: (password: string, targetMid: string) => Promise<{ success: boolean, error?: string }>
   onLicenseDeactivated: (callback: (event: any, reason: string) => void) => void
+  onLicenseRestored: (callback: (event: any, expiry: string | null) => void) => void
   selectLocalVideo: () => Promise<string | null>
   localConvertVideoToMp3: (path: string) => Promise<{ success: boolean, path: string }>
   onConversionProgress: (callback: (event: any, data: any) => void) => () => void
@@ -85,9 +86,12 @@ export interface DownloadAPI {
   getPlaylistInfo: (url: string) => Promise<{ title: string, entries: any[] }>
   batchAddToQueue: (data: { items: any[], playlistTitle?: string, audioOnly: boolean, headers?: Record<string, string> }) => void
   // [v1.6.1] Feedback APIs ★
-  submitFeedback: (rating: number, comment: string) => Promise<{ success: boolean, error?: string }>
+  submitFeedback: (rating: number, comment: string) => Promise<{ success: boolean, error?: string, already?: boolean }>
   adminGetFeedback: (password: string) => Promise<{ success: boolean, feedback?: any[], error?: string }>
   getFeedbackStatus: () => Promise<{ submitted: boolean }>
+  // [v2.4.5] Annonces mobiles 📣
+  adminSetAnnounce: (password: string, title: string, message: string, url: string, target?: string) => Promise<{ success: boolean, cleared?: boolean, announce?: any, target?: string, error?: string }>
+  getAnnounce: (platform?: string) => Promise<{ announce: { id: string, title: string, body: string, url?: string } | null }>
   // [v1.6.0] Auto-Update APIs 🚀
   startAppUpdate: (downloadUrl: string, expectedHash: string) => Promise<{ success: boolean, error?: string }>
   installAppUpdate: () => Promise<{ success: boolean, error?: string }>
