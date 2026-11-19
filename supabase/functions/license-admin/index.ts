@@ -343,6 +343,8 @@ serve(async (req) => {
 
     const adminActions = new Set([
       "admin-generate-key",
+      "admin-extend-license",
+      "admin-get-devices",
       "admin-bulk-generate",
       "admin-get-all-licenses",
       "admin-update-license-status",
@@ -468,6 +470,55 @@ serve(async (req) => {
       const { data, error } = await supabase.from("feedback").select("*").order("created_at", { ascending: false })
       if (error) throw error
       return json({ success: true, feedback: data || [] })
+    }
+
+    // [DoulGet Admin] Prolonger une licence sans nouvelle clé à saisir : nouvelle date, clé
+    // signée pour cet appareil, enregistrée. Le mobile la reprend à son prochain ping-license
+    // (FOUND) ; le PC la restaure quand son ancienne date est passée. Une durée en jours
+    // s'ajoute à la date actuelle si elle n'est pas passée, sinon à maintenant. Le blocage
+    // n'est pas touché.
+    if (action === "admin-extend-license") {
+      const targetMid = String(body.targetMid || "").trim().toUpperCase()
+      if (!targetMid) return json({ success: false, error: "Appareil manquant." }, 400)
+      const { data: row, error: readError } = await supabase
+        .from("licences")
+        .select("hwid,expiry_date")
+        .eq("hwid", targetMid)
+        .maybeSingle()
+      if (readError) throw readError
+      if (!row) return json({ success: false, error: "Cet appareil n'a pas de licence." }, 404)
+
+      const duration = body.durationDays
+      let expiry: string
+      if (duration === "permanent" || (typeof duration === "string" && duration.startsWith("date:"))) {
+        expiry = computeExpiry(duration)
+      } else {
+        const days = Number.parseInt(String(duration), 10)
+        if (!Number.isFinite(days) || days <= 0) throw new Error("Durée invalide.")
+        const current = row.expiry_date ? new Date(row.expiry_date).getTime() : Number.NaN
+        const base = Number.isFinite(current) && current > Date.now() ? current : Date.now()
+        expiry = new Date(base + days * 24 * 60 * 60 * 1000).toISOString()
+      }
+
+      const key = signLicense(targetMid, expiry)
+      const { error } = await supabase
+        .from("licences")
+        .update({ license_key: key, expiry_date: expiry, status: "active" })
+        .eq("hwid", targetMid)
+      if (error) throw error
+      return json({ success: true, key, expiry })
+    }
+
+    // [DoulGet Admin] Appareils vus par le serveur (essais) : PC et mobile, licenciés ou non.
+    // Les 1000 vus le plus récemment : c'est le plafond des réponses de Supabase.
+    if (action === "admin-get-devices") {
+      const { data, error } = await supabase
+        .from("devices")
+        .select("hwid,first_seen,last_seen")
+        .order("last_seen", { ascending: false })
+        .limit(1000)
+      if (error) throw error
+      return json({ success: true, devices: data || [] })
     }
 
     // [v2.4.5] Annonce aux utilisateurs mobiles : stockée dans app_config (clé "announce",
